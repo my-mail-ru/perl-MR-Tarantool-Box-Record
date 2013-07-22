@@ -6,7 +6,7 @@ use Mouse::Util::MetaRole;
 use MR::IProto::XS;
 
 Mouse::Exporter->setup_import_methods(
-    as_is => [ 'iproto', 'namespace', 'has_field' ],
+    as_is => [ 'iproto', 'namespace', 'has_field', 'has_index' ],
     also  => 'Mouse',
 );
 
@@ -33,6 +33,10 @@ sub namespace {
 
 sub has_field {
     caller->meta->add_field(@_);
+}
+
+sub has_index {
+    caller->meta->add_index(@_);
 }
 
 1;

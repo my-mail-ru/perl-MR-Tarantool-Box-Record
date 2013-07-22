@@ -3,11 +3,19 @@ package MR::Tarantool::Box::Record::Trait::Attribute::Field;
 use Mouse::Util::TypeConstraints;
 
 enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( L l S s C c & $ );
-enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec );
+
+my $mutator_type = enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec );
+subtype 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef' => as 'HashRef' => where {
+    foreach (keys %$_) {
+        return 0 unless $mutator_type->check($_);
+    }
+    return 1;
+};
 
 no Mouse::Util::TypeConstraints;
 
 use Mouse::Role;
+use MR::Tarantool::Box::Record::Meta::Index;
 
 has format => (
     is  => 'ro',
@@ -22,12 +30,7 @@ has [qw/serialize deserialize/] => (
 
 has index => (
     is  => 'ro',
-    isa => 'Str',
-);
-
-has selector => (
-    is  => 'ro',
-    isa => 'Str',
+    isa => 'MR::Tarantool::Box::Record::Meta::Index',
 );
 
 has primary_key => (
@@ -36,8 +39,8 @@ has primary_key => (
 );
 
 has mutators => (
-    is  => 'ro',
-    isa => 'ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator]',
+    is  => 'rw',
+    isa => 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef | ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator]',
     default => sub { [] },
 );
 
@@ -62,9 +65,28 @@ has mutators => (
         }
         $args->{trigger} = $trigger;
 
+        unless (blessed $args->{index}) {
+            my %index_args = map { $_ => delete $args->{$_} } grep exists $args->{$_}, qw/uniq selector/;
+            $index_args{name} = delete $args->{index} if exists $args->{index};
+            $index_args{default} = $args->{primary_key} if exists $args->{primary_key};
+            if (%index_args) {
+                $index_args{fields} = [$name];
+                $args->{index} = MR::Tarantool::Box::Record::Meta::Index->new(\%index_args);
+            }
+        }
+
         return;
     };
 }
+
+after install_accessors => sub {
+    my ($self) = @_;
+    if (my $index = $self->index) {
+        $self->associated_class->add_index($index);
+    }
+    $self->_install_mutators();
+    return;
+};
 
 {
     my %op_alias = (
@@ -72,29 +94,33 @@ has mutators => (
         dec => 'num_sub',
     );
 
-    after install_accessors => sub {
+    sub _install_mutators {
         my ($self) = @_;
+        my $field = $self->name;
         my $associated_class = $self->associated_class;
-        if (my $selector = $self->selector) {
-            my $field = $self->name;
-            $self->index("idx_$field") unless $self->index;
-            $associated_class->add_method($selector => sub {
-                my ($self, $keys) = @_;
-                return $self->select($field => $keys);
-            });
-            $self->associate_method($selector);
-        }
-        foreach my $mutator (@{$self->mutators}) {
-            my $field = $self->name;
-            my $name = $mutator . '_' . $field;
+        my %mutators = $self->_canonicalize_mutators();
+        $self->mutators(\%mutators);
+        foreach my $mutator (keys %mutators) {
+            my $method = $mutators{$mutator};
             my $op = $op_alias{$mutator} || $mutator;
             my $sub = $mutator eq 'inc' || $mutator eq 'dec' ? sub { push @{$_[0]->_update_ops}, [ $field, $op, @_ == 1 ? 1 : $_[1] ] }
                 : sub { push @{$_[0]->_update_ops}, [ $field, $op, $_[1] ] };
-            $associated_class->add_method($name, $sub);
-            $self->associate_method($name);
+            $associated_class->add_method($method, $sub);
+            $self->associate_method($method);
         }
         return;
-    };
+    }
+}
+
+sub _canonicalize_mutators {
+    my ($self) = @_;
+    my $mutators = $self->mutators;
+    if (ref $mutators eq 'ARRAY') {
+        my $field = $self->name;
+        return map "${_}_${field}", @$mutators;
+    } else {
+        return %$mutators;
+    }
 }
 
 no Mouse::Role;

@@ -51,36 +51,33 @@ sub _init_new {}
 
 sub select {
     my ($class, $field, $keys, %opts) = @_;
-    my $wantarrayref = ref $keys;
     my $noraise = delete $opts{noraise_unavailable};
     my $autocreate = delete $opts{autocreate};
     my $meta = $class->meta;
-    my $attr = $meta->get_attribute($field);
-    my $index = $attr->index
+    my $box = $meta->box;
+    my $index = $meta->index_by_name->{$field}
         or confess "Can't use field '$field' as an indexed field";
-    my $type = $attr->type_constraint;
-    my $serialize = $attr->serialize;
-    my $keys_hash = ref $keys eq 'HASH' ? $keys : { 0 => ref $keys eq 'ARRAY' ? $keys : [ $keys ] };
-    my @request = map {
-        my $keys = $keys_hash->{$_};
-        if ($type) {
-            foreach my $key (@$keys) {
-                cluck((defined $key ? "'$key'" : 'undef') . " doesn't look like $field") unless $type->check($key);
-            }
+    my $single_multifield = ref $keys eq 'ARRAY' && $index->multifield && @$keys && !ref $keys->[0];
+    my $wantarrayref = ref $keys && !$single_multifield || !$index->uniq;
+    $keys = [ $keys ] if $single_multifield;
+    my $shard_keys;
+    my $prepare_keys = $index->prepare_keys;
+    if (ref $keys eq 'HASH') {
+        confess "option 'shard_num' shouldn't be used with \$keys passed as a HASHREF" if exists $opts{shard_num};
+        $shard_keys = { map { $_ => $prepare_keys ? $prepare_keys->($keys->{$_}) : $keys->{$_} } keys %$keys };
+    } else {
+        $keys = [ $keys ] unless ref $keys;
+        $keys = $prepare_keys->($keys) if $prepare_keys;
+        if ($opts{shard_num} && $opts{shard_num} eq 'all') {
+            delete $opts{shard_num};
+            $shard_keys = { map { $_ => $keys } (1 .. $box->iproto->get_shard_count()) };
         }
-        if ($serialize) {
-            $keys = [ map $serialize->($_), @$keys ];
-        }
-        +{
-            %opts,
-            type => 'select',
-            keys => $keys,
-            use_index => $index,
-            inplace   => 1,
-            $_ ? (shard_num => $_) : (),
-        }
-    } keys %$keys_hash;
-    my $response = $meta->box->bulk(\@request);
+    }
+    $opts{type} = 'select';
+    $opts{use_index} = $index->name;
+    $opts{inplace} = 1;
+    my @request = $shard_keys ? map +{ %opts, keys => $shard_keys->{$_}, shard_num => $_ }, keys %$shard_keys : { %opts, keys => $keys };
+    my $response = $box->bulk(\@request);
     my @alltuples;
     foreach my $resp (@$response) {
         if ($resp->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
@@ -99,11 +96,19 @@ sub select {
         }
         push @alltuples, @$tuples;
     }
+    if (my $limit = $opts{limit}) {
+        $#alltuples = $limit - 1 if @alltuples > $limit;
+    }
     if (my $deserialize = $meta->deserialize) {
         $deserialize->(\@alltuples);
     }
     my @list = map $class->new($_), @alltuples;
-    return $wantarrayref ? \@list : $list[0];
+    if ($wantarrayref) {
+        return \@list;
+    } else {
+        cluck sprintf "Select returned %d rows when only one row was expected", scalar @list if @list > 1;
+        return $list[0];
+    }
 }
 
 sub insert {

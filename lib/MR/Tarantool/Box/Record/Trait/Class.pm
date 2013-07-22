@@ -2,6 +2,7 @@ package MR::Tarantool::Box::Record::Trait::Class;
 
 use Mouse::Role;
 use MR::Tarantool::Box::XS;
+use List::MoreUtils qw/uniq/;
 
 use Mouse::Util::TypeConstraints;
 type 'MR::Tarantool::Box::Record::Trait::Class::Box' => where {
@@ -26,36 +27,6 @@ has namespace => (
     isa => 'Int',
 );
 
-has fields => (
-    is  => 'ro',
-    isa => 'ArrayRef[Str]',
-    lazy    => 1,
-    default => sub { [ map $_->name, $_[0]->get_all_fields() ] },
-);
-
-has format => (
-    is  => 'rw',
-    isa => 'Str',
-    lazy    => 1,
-    default => sub { join '', map $_->format, $_[0]->get_all_fields() },
-);
-
-has indexes => (
-    is  => 'ro',
-    isa => 'ArrayRef[HashRef]',
-    lazy    => 1,
-    default => sub {
-        my ($self) = @_;
-        return [
-            map +{
-                name => $_->index,
-                keys => [ $_->name ],
-                default => $_->primary_key,
-            }, grep $_->index, $self->get_all_fields()
-        ];
-    },
-);
-
 has primary_key => (
     is  => 'ro',
     isa => 'Str',
@@ -73,14 +44,24 @@ has box => (
     is  => 'rw',
     isa => 'MR::Tarantool::Box::Record::Trait::Class::Box',
     lazy    => 1,
-    builder => sub {
+    default => sub {
         my ($self) = @_;
+        my (@fields, $format);
+        foreach my $attr ($self->get_all_fields()) {
+            push @fields, $attr->name;
+            $format .= $attr->format;
+        }
+        my @indexes = map +{
+            name    => $_->name,
+            keys    => $_->fields,
+            default => $_->default,
+        }, @{$self->indexes};
         return MR::Tarantool::Box::XS->new(
             iproto    => $self->iproto,
             namespace => $self->namespace,
-            fields    => $self->fields,
-            format    => $self->format,
-            indexes   => $self->indexes,
+            fields    => \@fields,
+            format    => $format,
+            indexes   => \@indexes,
         );
     },
 );
@@ -111,6 +92,34 @@ foreach my $attrname ('serialize', 'deserialize') {
     );
 }
 
+has indexes => (
+    is  => 'ro',
+    isa => 'ArrayRef[MR::Tarantool::Box::Record::Meta::Index]',
+    default => sub { [] },
+);
+
+has index_by_name => (
+    is  => 'ro',
+    isa => 'HashRef[MR::Tarantool::Box::Record::Meta::Index]',
+    lazy    => 1,
+    default => sub {
+        my ($self) = @_;
+        my %data;
+        foreach my $index (@{$self->indexes}) {
+            $data{$index->name} ||= $index;
+            $data{join ',', @{$index->fields}} ||= $index;
+        }
+        return \%data;
+    },
+);
+
+has fields_accessors => (
+    is  => 'ro',
+    isa => 'ArrayRef',
+    lazy    => 1,
+    default => sub { [ map uniq(grep defined, $_->get_read_method(), $_->get_write_method(), values %{$_->mutators}), $_[0]->get_all_fields() ] },
+);
+
 sub add_field {
     my $self = shift;
     my $name = shift;
@@ -123,14 +132,33 @@ sub add_field {
     return;
 }
 
+sub add_index {
+    my $self = shift;
+    my $index;
+    if (blessed $_[0]) {
+        $index = shift;
+        $index->associated_class($self);
+    } else {
+        my $name = shift;
+        my %args = @_ == 0 ? (fields => $name) : @_ == 1 ? (fields => shift) : @_;
+        $args{name} = $name unless ref $name;
+        $args{fields} = [ $args{fields} ] unless ref $args{fields};
+        $args{associated_class} = $self;
+        $index = MR::Tarantool::Box::Record::Meta::Index->new(\%args);
+    }
+    $index->install_selectors();
+    push @{$self->indexes}, $index;
+    return;
+}
+
 after make_immutable => sub {
-    $_[0]->fields;
-    $_[0]->format;
-    $_[0]->indexes;
     $_[0]->primary_key;
     $_[0]->box;
     $_[0]->serialize;
     $_[0]->deserialize;
+    $_[0]->index_by_name;
+    $_[0]->fields_accessors;
+    return;
 };
 
 sub get_field_list {
