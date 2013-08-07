@@ -2,7 +2,8 @@ package MR::Tarantool::Box::Record::Trait::Attribute::Field;
 
 use Mouse::Util::TypeConstraints;
 
-enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( L l S s C c & $ );
+enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( Q q L l S s C c & $ );
+my %SIZEOF = (Q => 8, q => 8, L => 4, l => 4, S => 2, s => 2, C => 1, c => 1, '&' => undef, '$' => undef);
 
 my $mutator_type = enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec );
 subtype 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef' => as 'HashRef' => where {
@@ -16,6 +17,14 @@ no Mouse::Util::TypeConstraints;
 
 use Mouse::Role;
 use MR::Tarantool::Box::Record::Meta::Index;
+use MR::Tarantool::Box::Record::Meta::Sequence;
+
+with 'MR::Tarantool::Box::Record::Trait::Attribute::Devel';
+
+has number => (
+    is  => 'rw',
+    isa => 'Int',
+);
 
 has format => (
     is  => 'ro',
@@ -38,25 +47,53 @@ has primary_key => (
     isa => 'Bool',
 );
 
+has sequence => (
+    is  => 'ro',
+    isa => 'MR::Tarantool::Box::Record::Meta::Sequence',
+);
+
 has mutators => (
     is  => 'rw',
     isa => 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef | ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator]',
     default => sub { [] },
 );
 
+has object => (
+    is  => 'rw',
+    isa => 'Str',
+);
+
+has size => (
+    is  => 'ro',
+    isa => 'Maybe[Int]',
+    lazy    => 1,
+    default => sub { $SIZEOF{$_[0]->format} },
+);
+
+has min_size => (
+    is  => 'ro',
+    isa => 'Int',
+    lazy    => 1,
+    default => sub { $_[0]->size || 0 },
+);
+
+has max_size => (
+    is  => 'ro',
+    isa => 'Maybe[Int]',
+    lazy    => 1,
+    default => sub { $_[0]->size },
+);
+
 {
     my %default = (
-        map({ $_ => 0 } qw( L l S s C c )),
+        map({ $_ => 0 } qw( Q q L l S s C c )),
         map({ $_ => "" } qw( & $ )),
     );
 
     before _process_options => sub {
         my ($class, $name, $args) = @_;
 
-        $args->{required} = 1 if $args->{primary_key};
-
-        $args->{default} = $default{$args->{format}}
-            if !exists $args->{default} && exists $default{$args->{format}};
+        $args->{required} = 1 if $args->{primary_key} && !exists $args->{required};
 
         my $trigger = sub { push @{$_[0]->_update_ops}, [ $name => set => $_[1] ] if $_[0]->_built };
         if (my $orig_trigger = $args->{trigger}) {
@@ -66,13 +103,30 @@ has mutators => (
         $args->{trigger} = $trigger;
 
         unless (blessed $args->{index}) {
-            my %index_args = map { $_ => delete $args->{$_} } grep exists $args->{$_}, qw/uniq selector/;
+            my %index_args = map { $_ => delete $args->{$_} } grep exists $args->{$_}, qw/uniq selector shard_by/;
             $index_args{name} = delete $args->{index} if exists $args->{index};
             $index_args{default} = $args->{primary_key} if exists $args->{primary_key};
+            $index_args{number} = delete $args->{index_number} if exists $args->{index_number};
             if (%index_args) {
                 $index_args{fields} = [$name];
                 $args->{index} = MR::Tarantool::Box::Record::Meta::Index->new(\%index_args);
             }
+        }
+
+        unless (blessed $args->{sequence}) {
+            my %sequence_args = map { $_ => delete $args->{"sequence_$_"} } grep exists $args->{"sequence_$_"}, qw/id iproto namespace/;
+            if (%sequence_args || delete $args->{sequence}) {
+                $sequence_args{field} = $name;
+                $args->{sequence} = MR::Tarantool::Box::Record::Meta::Sequence->new(\%sequence_args);
+            }
+        }
+        if ($args->{sequence} && !exists $args->{default} && !exists $args->{builder}) {
+            $args->{lazy} = 1;
+            $args->{builder} = $args->{sequence}->next_method;
+        }
+
+        if (!$args->{required} && !$args->{primary_key} && !exists $args->{default} && !exists $args->{builder} && exists $default{$args->{format}}) {
+            $args->{default} = $default{$args->{format}};
         }
 
         return;
@@ -85,6 +139,10 @@ after install_accessors => sub {
         $self->associated_class->add_index($index);
     }
     $self->_install_mutators();
+    if (my $sequence = $self->sequence) {
+        $sequence->associated_field($self);
+        $sequence->install_methods();
+    }
     return;
 };
 

@@ -1,7 +1,10 @@
 package MR::Tarantool::Box::Record::Trait::Class;
 
 use Mouse::Role;
+use MR::IProto::XS;
 use MR::Tarantool::Box::XS;
+use MR::Tarantool::Box::Record::Meta::Index;
+use MR::Tarantool::Box::Record::Meta::Index::Part;
 use List::MoreUtils qw/uniq/;
 
 use Mouse::Util::TypeConstraints;
@@ -17,7 +20,15 @@ type 'MR::Tarantool::Box::Record::Trait::Class::Box' => where {
 };
 no Mouse::Util::TypeConstraints;
 
-has iproto => (
+with 'MR::Tarantool::Box::Record::Trait::Class::Devel';
+
+has iproto_class => (
+    is  => 'rw',
+    isa => 'ClassName',
+    default => 'MR::IProto::XS',
+);
+
+has _iproto => (
     is  => 'rw',
     isa => 'MR::IProto::XS',
 );
@@ -40,6 +51,12 @@ has primary_key => (
     },
 );
 
+has box_class => (
+    is  => 'rw',
+    isa => 'ClassName',
+    default => 'MR::Tarantool::Box::XS',
+);
+
 has box => (
     is  => 'rw',
     isa => 'MR::Tarantool::Box::Record::Trait::Class::Box',
@@ -56,8 +73,8 @@ has box => (
             keys    => $_->fields,
             default => $_->default,
         }, @{$self->indexes};
-        return MR::Tarantool::Box::XS->new(
-            iproto    => $self->iproto,
+        return $self->box_class->new(
+            iproto    => $self->_iproto,
             namespace => $self->namespace,
             fields    => \@fields,
             format    => $format,
@@ -82,6 +99,7 @@ foreach my $attrname ('serialize', 'deserialize') {
                 my ($tuples) = @_;
                 foreach my $tuple (@$tuples) {
                     while (my ($name, $func) = each %funcs) {
+                        next unless exists $tuple->{$name};
                         local $_ = $tuple->{$name};
                         $tuple->{$name} = $func->($_, $tuple);
                     }
@@ -92,20 +110,32 @@ foreach my $attrname ('serialize', 'deserialize') {
     );
 }
 
+has fields => (
+    is  => 'ro',
+    isa => 'ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field]',
+    default => sub { [] },
+);
+
 has indexes => (
     is  => 'ro',
     isa => 'ArrayRef[MR::Tarantool::Box::Record::Meta::Index]',
     default => sub { [] },
 );
 
+has index_parts => (
+    is  => 'ro',
+    isa => 'ArrayRef[MR::Tarantool::Box::Record::Meta::Index::Part]',
+    default => sub { [] },
+);
+
 has index_by_name => (
     is  => 'ro',
-    isa => 'HashRef[MR::Tarantool::Box::Record::Meta::Index]',
+    isa => 'HashRef[MR::Tarantool::Box::Record::Meta::Index::Base]',
     lazy    => 1,
     default => sub {
         my ($self) = @_;
         my %data;
-        foreach my $index (@{$self->indexes}) {
+        foreach my $index (@{$self->indexes}, @{$self->index_parts}) {
             $data{$index->name} ||= $index;
             $data{join ',', @{$index->fields}} ||= $index;
         }
@@ -120,17 +150,73 @@ has fields_accessors => (
     default => sub { [ map uniq(grep defined, $_->get_read_method(), $_->get_write_method(), values %{$_->mutators}), $_[0]->get_all_fields() ] },
 );
 
+has sequence_iproto => (
+    is  => 'rw',
+    isa => 'MR::IProto::XS',
+    lazy    => 1,
+    default => sub { confess "'sequence_iproto' should be configured to use sequences" },
+);
+
+has sequence_namespace => (
+    is  => 'rw',
+    isa => 'Int',
+    lazy    => 1,
+    default => sub { confess "'sequence_namespace' should be configured to use sequences" },
+);
+
+sub set_iproto {
+    my $self = shift;
+    my $iproto = @_ == 1 ? shift : $self->iproto_class->new(@_);
+    $self->_iproto($iproto);
+    return;
+}
+
+sub shard_by {
+    my ($self, $code) = @_;
+    $self->add_attribute('+shard_num',
+        lazy    => 1,
+        default => $code,
+    );
+    return;
+}
+
 sub add_field {
     my $self = shift;
     my $name = shift;
     my %args = @_ == 1 ? (format => shift) : @_;
     push @{$args{traits}}, 'MR::Tarantool::Box::Record::Trait::Attribute::Field';
-    $self->add_attribute(
-        $name => %args,
-        is    => 'rw',
-    );
+    $self->add_attribute($name, is => 'rw', %args);
     return;
 }
+
+sub add_field_object {
+    my $self = shift;
+    my $name = shift;
+    my %args = @_;
+    push @{$args{traits}}, 'MR::Tarantool::Box::Record::Trait::Attribute::FieldObject';
+    $self->add_attribute($name, is => 'ro', %args);
+    return;
+}
+
+around add_attribute => sub {
+    my ($orig, $self) = splice @_, 0, 2;
+    my $attr = $self->$orig(@_);
+    if ($attr->does('MR::Tarantool::Box::Record::Trait::Attribute::Field')) {
+        my $number;
+        my $fields = $self->fields;
+        if (defined($number = $attr->number)) {
+            confess "Field number $number already exists"
+                if defined $fields->[$number] && $fields->[$number]->name ne $attr->name;
+        } else {
+            for ($number = 0; $number <= @$fields; $number++) {
+                last unless defined $fields->[$number];
+            }
+            $attr->number($number);
+        }
+        $fields->[$number] = $attr;
+    }
+    return $attr;
+};
 
 sub add_index {
     my $self = shift;
@@ -147,26 +233,86 @@ sub add_index {
         $index = MR::Tarantool::Box::Record::Meta::Index->new(\%args);
     }
     $index->install_selectors();
-    push @{$self->indexes}, $index;
+    my $number;
+    my $indexes = $self->indexes;
+    if (defined($number = $index->number)) {
+        confess "Index number $number already exists"
+            if defined $indexes->[$number] && $indexes->[$number]->name ne $index->name;
+    } else {
+        for ($number = 0; $number <= @$indexes; $number++) {
+            last unless defined $indexes->[$number];
+        }
+        $index->number($number);
+    }
+    $indexes->[$number] = $index;
+    return;
+}
+
+sub add_index_part {
+    my $self = shift;
+    my $part;
+    if (blessed $_[0]) {
+        $part = shift;
+        $part->associated_class($self);
+    } else {
+        my $name = shift;
+        my %args = @_ == 1 ? (index => shift) : @_;
+        $args{name} = $name;
+        $args{associated_class} = $self;
+        $part = MR::Tarantool::Box::Record::Meta::Index::Part->new(\%args);
+    }
+    $part->install_selectors();
+    push @{$self->index_parts}, $part;
     return;
 }
 
 after make_immutable => sub {
-    $_[0]->primary_key;
-    $_[0]->box;
-    $_[0]->serialize;
-    $_[0]->deserialize;
-    $_[0]->index_by_name;
-    $_[0]->fields_accessors;
+    my ($self) = @_;
+    $self->_validate_fields();
+    $self->_validate_indexes();
+    $self->primary_key;
+    $self->box;
+    $self->serialize;
+    $self->deserialize;
+    $self->index_by_name;
+    $self->fields_accessors;
     return;
 };
 
 sub get_field_list {
-    return grep $_[0]->get_attribute($_)->does('MR::Tarantool::Box::Record::Trait::Attribute::Field'), $_[0]->get_attribute_list();
+    return map $_->name, @{$_[0]->fields};
 }
 
 sub get_all_fields {
-    return grep $_->does('MR::Tarantool::Box::Record::Trait::Attribute::Field'), $_[0]->get_all_attributes();
+    return @{$_[0]->fields};
+}
+
+sub initialize_sequence {
+    my ($self, $field_name) = @_;
+    my $field = $self->get_attribute($field_name)
+        or confess "Field $field_name not exists";
+    my $sequence = $field->sequence
+        or confess "Field $field_name has no sequence";
+    $sequence->initialize_sequence();
+    return;
+}
+
+sub _validate_fields {
+    my ($self) = @_;
+    my $fields = $self->fields;
+    my @empty = grep !defined($fields->[$_]), (0 .. $#$fields);
+    return unless @empty;
+    my $numbers = join ', ', @empty;
+    confess "Fields numbers $numbers are not defined";
+}
+
+sub _validate_indexes {
+    my ($self) = @_;
+    my $indexes = $self->indexes;
+    my @empty = grep !defined($indexes->[$_]), (0 .. $#$indexes);
+    return unless @empty;
+    my $numbers = join ', ', @empty;
+    confess "Indexes number $numbers are not defined";
 }
 
 no Mouse::Role;

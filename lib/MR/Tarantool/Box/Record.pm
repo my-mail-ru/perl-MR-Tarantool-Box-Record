@@ -3,10 +3,11 @@ package MR::Tarantool::Box::Record;
 use Mouse ();
 use Mouse::Exporter;
 use Mouse::Util::MetaRole;
-use MR::IProto::XS;
+use MR::Tarantool::Box::Record::Object;
+use MR::Tarantool::Box::Record::Trait::Class;
 
 Mouse::Exporter->setup_import_methods(
-    as_is => [ 'iproto', 'namespace', 'has_field', 'has_index' ],
+    as_is => [ 'iproto', 'namespace', 'shard_by', 'has_field', 'has_field_object', 'has_index', 'has_index_part' ],
     also  => 'Mouse',
 );
 
@@ -23,20 +24,31 @@ sub init_meta {
 }
 
 sub iproto {
-    my $iproto = @_ == 1 ? shift : MR::IProto::XS->new(@_);
-    caller->meta->iproto($iproto);
+    caller->meta->set_iproto(@_);
 }
 
 sub namespace {
     caller->meta->namespace(@_);
 }
 
+sub shard_by (&) {
+    caller->meta->shard_by(@_);
+}
+
 sub has_field {
     caller->meta->add_field(@_);
 }
 
+sub has_field_object {
+    caller->meta->add_field_object(@_);
+}
+
 sub has_index {
     caller->meta->add_index(@_);
+}
+
+sub has_index_part {
+    caller->meta->add_index_part(@_);
 }
 
 1;
