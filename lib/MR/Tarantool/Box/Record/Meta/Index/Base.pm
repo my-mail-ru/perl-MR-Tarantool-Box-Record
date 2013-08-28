@@ -1,6 +1,8 @@
 package MR::Tarantool::Box::Record::Meta::Index::Base;
 
 use Mouse;
+use Carp qw/cluck/;
+
 with 'MR::Tarantool::Box::Record::Trait::Index::FieldObject';
 
 has associated_class => (

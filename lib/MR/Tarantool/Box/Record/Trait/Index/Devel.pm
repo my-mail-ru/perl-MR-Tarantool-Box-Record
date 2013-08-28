@@ -32,7 +32,8 @@ has storage_size => (
                 my $field = $self->associated_class->get_attribute($name);
                 $sizeofkeys += $self->index_field_type($field) eq 'STR' ? 2 + 8 : $field->size;
             }
-            return (8 + $sizeofkeys) / $fillfactor;
+            # internal tree pointers are always 32bit wide
+            return (4 + 4 + 8 + $sizeofkeys) / $fillfactor;
         } else {
             confess sprintf "Unknown type %s", $self->type;
         }

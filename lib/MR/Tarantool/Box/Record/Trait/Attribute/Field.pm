@@ -18,6 +18,7 @@ no Mouse::Util::TypeConstraints;
 use Mouse::Role;
 use MR::Tarantool::Box::Record::Meta::Index;
 use MR::Tarantool::Box::Record::Meta::Sequence;
+use Data::Dumper ();
 
 with 'MR::Tarantool::Box::Record::Trait::Attribute::Devel';
 
@@ -175,10 +176,20 @@ sub _canonicalize_mutators {
     my $mutators = $self->mutators;
     if (ref $mutators eq 'ARRAY') {
         my $field = $self->name;
-        return map "${_}_${field}", @$mutators;
+        return map { $_ => "${_}_${field}" } @$mutators;
     } else {
         return %$mutators;
     }
+}
+
+sub is_number {
+    my ($self) = @_;
+    return defined $SIZEOF{$self->format};
+}
+
+sub value_for_debug {
+    my ($self, $value) = @_;
+    return $self->is_number() ? $value : Data::Dumper::qquote($value, $self->format eq '$' ? 'utf8' : undef);
 }
 
 no Mouse::Role;

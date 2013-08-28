@@ -157,7 +157,8 @@ sub insert {
     });
     if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
         my $class = ref $self;
-        die "Failed to insert $class: $response->{error}";
+        my $data = join ', ', map sprintf("%s: %s", $_->name, $_->value_for_debug($data{$_->name})), $meta->get_all_fields();
+        confess "Failed to insert $class: $response->{error} [ $data ]";
     }
     return;
 }
@@ -188,7 +189,7 @@ sub update {
     @$ops = ();
     if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
         my $class = ref $self;
-        die "Failed to update $class: $response->{error}";
+        confess "Failed to update $class: $response->{error}";
     }
     return;
 }
@@ -207,7 +208,7 @@ sub delete {
     });
     if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
         my $class = ref $self;
-        die "Failed to delete $class: $response->{error}";
+        confess "Failed to delete $class: $response->{error}";
     }
     return;
 }
