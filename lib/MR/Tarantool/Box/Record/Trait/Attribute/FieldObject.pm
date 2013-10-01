@@ -74,9 +74,10 @@ sub modify_field {
     my $reader = $self->get_read_method_ref();
     my $method = $self->key;
     my $object_name = $self->name;
+    my $object_predicate = $self->{_mouse_cache_predicate_ref} ||= $self->_get_accessor_method_ref('predicate', '_generate_predicate');
     my $field_name = $field->name;
     my ($has_default, $default_value, $default_method);
-    if (my $has_default = $field->has_default || $field->has_builder) {
+    if ($has_default = $field->has_default || $field->has_builder) {
         if ($field->has_default) {
             if (ref $field->default eq 'CODE') {
                 $default_method = $field->default;
@@ -90,14 +91,14 @@ sub modify_field {
     $associated_class->add_attribute('+' . $self->field,
         lazy    => 1,
         default => sub {
-            my $value = $_[0]->$reader;
-            unless (defined $value) {
-                if ($has_default) {
-                    return $default_method ? $_[0]->$default_method : $default_value;
-                }
+            if ($_[0]->$object_predicate) {
+                my $value = $_[0]->$reader;
+                return $value->$method;
+            } elsif ($has_default) {
+                return $default_method ? $_[0]->$default_method : $default_value;
+            } else {
                 confess "One of attributes '$object_name' or '$field_name' is required";
             }
-            return $value->$method;
         },
     );
     return;
@@ -110,12 +111,10 @@ sub apply_to_object {
     my $field = $associated_class->get_attribute($self->field);
     my $object_name = $self->name;
     my $field_name = $field->name;
-    my $predicate = $field->{_mouse_cache_predicate_ref} ||= $field->_get_accessor_method_ref('predicate', '_generate_predicate');
-    my $reader = $field->get_read_method_ref();
+    my $reader = $field->get_read_method();
     $self->{default} = sub {
-        confess "One of attributes '$object_name' or '$field_name' is required" unless $_[0]->$predicate;
         local $_ = $_[0]->$reader;
-        return $_[0]->$to_object();
+        return $_[0]->$to_object($_);
     };
     return;
 }
