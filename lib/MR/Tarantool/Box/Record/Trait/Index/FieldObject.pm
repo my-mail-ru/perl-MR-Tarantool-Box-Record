@@ -10,7 +10,6 @@ has deobject_keys => (
     default  => sub {
         my ($self) = @_;
         my $attrs = $self->fields_attrs;
-        my @fields = map $_->name, @$attrs;
         my @object = map $_->object, @$attrs;
         return unless grep $_, @object;
         my (@methods, @shard_methods);
@@ -23,8 +22,7 @@ has deobject_keys => (
         }
         my $can_shard = grep $_, @shard_methods;
         return sub {
-            my ($keys) = @_;
-            my %map;
+            my ($keys, $map) = @_;
             if (ref $keys eq 'HASH') {
                 my %keys;
                 foreach my $shard_num (keys %$keys) {
@@ -35,7 +33,7 @@ has deobject_keys => (
                             foreach my $i (0 .. $#$key) {
                                 if (my $method = $methods[$i]) {
                                     $key[$i] = $key->[$i]->$method;
-                                    $map{$fields[$i]}{$key[$i]} = $key->[$i];
+                                    $map->{$object[$i]}->{$key[$i]} = $key->[$i];
                                 } else {
                                     $key[$i] = $key->[$i];
                                 }
@@ -44,13 +42,13 @@ has deobject_keys => (
                         } else {
                             my $method = $methods[0];
                             my $res = $key->$method;
-                            $map{$fields[0]}{$res} = $key;
+                            $map->{$object[0]}->{$res} = $key;
                             push @keys, $res;
                         }
                     }
                     $keys{$shard_num} = \@keys;
                 }
-                return (\%keys, \%map);
+                return \%keys;
             } elsif ($can_shard) {
                 my %keys;
                 foreach my $key (@$keys) {
@@ -59,7 +57,7 @@ has deobject_keys => (
                         foreach my $i (0 .. $#$key) {
                             if (my $method = $methods[$i]) {
                                 $key[$i] = $key->[$i]->$method;
-                                $map{$fields[$i]}{$key[$i]} = $key->[$i];
+                                $map->{$object[$i]}->{$key[$i]} = $key->[$i];
                                 if (my $shard_method = $shard_methods[$i]) {
                                     $shard_num ||= $key->[$i]->$shard_method;
                                 }
@@ -72,11 +70,11 @@ has deobject_keys => (
                         my $method = $methods[0];
                         my $shard_method = $shard_methods[0];
                         my $res = $key->$method;
-                        $map{$fields[0]}{$res} = $key;
+                        $map->{$object[0]}->{$res} = $key;
                         push @{$keys{$key->$shard_method}}, $res;
                     }
                 }
-                return (\%keys, \%map);
+                return \%keys;
             } else {
                 my @keys;
                 foreach my $key (@$keys) {
@@ -85,7 +83,7 @@ has deobject_keys => (
                         foreach my $i (0 .. $#$key) {
                             if (my $method = $methods[$i]) {
                                 $key[$i] = $key->[$i]->$method;
-                                $map{$fields[$i]}{$key[$i]} = $key->[$i];
+                                $map->{$object[$i]}->{$key[$i]} = $key->[$i];
                             } else {
                                 $key[$i] = $key->[$i];
                             }
@@ -94,37 +92,14 @@ has deobject_keys => (
                     } else {
                         my $method = $methods[0];
                         my $res = $key->$method;
-                        $map{$fields[0]}{$res} = $key;
+                        $map->{$object[0]}->{$res} = $key;
                         push @keys, $res;
                     }
                 }
-                return (\@keys, \%map);
+                return \@keys;
             }
         };
     },
-);
-
-has object_tuples => (
-    is  => 'ro',
-    isa => 'Maybe[CodeRef]',
-    init_arg => undef,
-    lazy     => 1,
-    default  => sub {
-        my ($self) = @_;
-        my $attrs = $self->fields_attrs;
-        my %object = map { $_->name => $_->object } grep $_->object, @$attrs;
-        return unless %object;
-        return sub {
-            my ($tuples, $map) = @_;
-            foreach my $tuple (@$tuples) {
-                foreach my $field (keys %$map) {
-                    next unless exists $tuple->{$field};
-                    $tuple->{$object{$field}} = $map->{$field}->{$tuple->{$field}};
-                }
-            }
-            return;
-        }
-    }
 );
 
 no Mouse::Role;

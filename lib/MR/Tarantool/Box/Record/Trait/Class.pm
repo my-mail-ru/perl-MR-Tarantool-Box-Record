@@ -20,6 +20,7 @@ type 'MR::Tarantool::Box::Record::Trait::Class::Box' => where {
 };
 no Mouse::Util::TypeConstraints;
 
+with 'MR::Tarantool::Box::Record::Trait::Class::FieldObject';
 with 'MR::Tarantool::Box::Record::Trait::Class::Devel';
 
 has iproto_class => (
@@ -186,15 +187,6 @@ sub add_field {
     my %args = @_ == 1 ? (format => shift) : @_;
     push @{$args{traits}}, 'MR::Tarantool::Box::Record::Trait::Attribute::Field';
     $self->add_attribute($name, is => 'rw', %args);
-    return;
-}
-
-sub add_field_object {
-    my $self = shift;
-    my $name = shift;
-    my %args = @_;
-    push @{$args{traits}}, 'MR::Tarantool::Box::Record::Trait::Attribute::FieldObject';
-    $self->add_attribute($name, is => 'ro', %args);
     return;
 }
 

@@ -3,7 +3,9 @@ package MR::Tarantool::Box::Record::Object;
 use Mouse;
 use Carp 'cluck';
 use MR::Tarantool::Box::XS;
-use overload ();
+use overload
+    '%{}' => sub { confess "Direct access to attributes through hash is provibited. Use accessors instead." },
+    fallback => 1;
 
 has shard_num => (
     is  => 'ro',
@@ -64,9 +66,9 @@ sub select {
     my $keys_is_bulk = $keys_is_array && !$single_multifield || ref $keys eq 'HASH';
     my $wantarrayref = $keys_is_bulk || !$uniq;
     $keys = [ $keys ] unless $keys_is_bulk;
-    my $object_map;
+    my $object_map = delete $opts{objects} || {};
     if (delete $opts{by_object} && (my $deobject_keys = $index->deobject_keys)) {
-        ($keys, $object_map) = $deobject_keys->($keys);
+        $keys = $deobject_keys->($keys, $object_map);
     }
     my $shard_keys;
     my $prepare_keys = $index->prepare_keys;
@@ -74,13 +76,28 @@ sub select {
         confess "option 'shard_num' shouldn't be used with \$keys passed as a HASHREF" if exists $opts{shard_num};
         $shard_keys = { map { $_ => $prepare_keys ? $prepare_keys->($keys->{$_}) : $keys->{$_} } keys %$keys };
     } else {
+        my $shard_nums;
         if (!exists $opts{shard_num} && (my $shard_by = $index->shard_by)) {
-            $opts{shard_num} = $class->$shard_by(@$keys);
+            my $shard_num = $class->$shard_by($keys, objects => $object_map);
+            if (ref $shard_num) {
+                $shard_nums = $shard_num;
+            } else {
+                $opts{shard_num} = $shard_num;
+            }
         }
         $keys = $prepare_keys->($keys) if $prepare_keys;
-        if ($opts{shard_num} && $opts{shard_num} eq 'all') {
-            delete $opts{shard_num};
-            $shard_keys = { map { $_ => $keys } (1 .. $box->iproto->get_shard_count()) };
+        if ($shard_nums) {
+            confess "size of ARRAYREF returned by 'shard_by' function should be equal to size of keys ARRAYREF" unless @$shard_nums == @$keys;
+            $shard_keys = {};
+            foreach (0 .. $#$keys) {
+                my $shard_num = $shard_nums->[$_] or next;
+                push @{$shard_keys->{$shard_num}}, $keys->[$_];
+            }
+        } else {
+            if ($opts{shard_num} && $opts{shard_num} eq 'all') {
+                delete $opts{shard_num};
+                $shard_keys = { map { $_ => $keys } (1 .. $box->iproto->get_shard_count()) };
+            }
         }
     }
     my $create = delete $opts{create};
@@ -125,8 +142,8 @@ sub select {
     if (my $deserialize = $meta->deserialize) {
         $deserialize->(\@alltuples);
     }
-    if (my $object_tuples = $index->object_tuples) {
-        $object_tuples->(\@alltuples, $object_map) if $object_map;
+    if (%$object_map && (my $object_tuples = $meta->object_tuples)) {
+        $object_tuples->(\@alltuples, $object_map);
     }
     my @list = map $class->new($_), @alltuples;
     if ($created) {

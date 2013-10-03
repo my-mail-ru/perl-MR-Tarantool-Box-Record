@@ -69,8 +69,8 @@ sub install_selectors {
 sub modify_field {
     my ($self) = @_;
     my $associated_class = $self->associated_class;
-    my $field = $associated_class->get_attribute($self->field);
-    $field->object($self->name);
+    my $field = $associated_class->get_attribute($self->field) or return;
+    $field->object($self->name) if $field->does('MR::Tarantool::Box::Record::Trait::Attribute::Field');
     my $reader = $self->get_read_method_ref();
     my $method = $self->key;
     my $object_name = $self->name;
