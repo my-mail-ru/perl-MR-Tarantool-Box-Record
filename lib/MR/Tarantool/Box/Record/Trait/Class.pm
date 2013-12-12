@@ -8,6 +8,7 @@ use MR::Tarantool::Box::Record::Meta::Index::Part;
 use List::MoreUtils qw/uniq/;
 
 use Mouse::Util::TypeConstraints;
+
 type 'MR::Tarantool::Box::Record::Trait::Class::Box' => where {
     my $class;
     if (ref $_) {
@@ -18,6 +19,18 @@ type 'MR::Tarantool::Box::Record::Trait::Class::Box' => where {
     }
     return $class->isa('MR::Tarantool::Box::XS');
 };
+
+type 'MR::Tarantool::Box::Record::Trait::Class::Box::Function' => where {
+    my $class;
+    if (ref $_) {
+        $class = blessed $_ or return;
+    } else {
+        return unless Mouse::Util::is_class_loaded($_);
+        $class = $_;
+    }
+    return $class->isa('MR::Tarantool::Box::XS::Function');
+};
+
 no Mouse::Util::TypeConstraints;
 
 with 'MR::Tarantool::Box::Record::Trait::Class::FieldObject';
@@ -52,6 +65,12 @@ has primary_key => (
     },
 );
 
+has override_by_lua => (
+    is  => 'ro',
+    isa => 'HashRef',
+    default => sub { {} },
+);
+
 has box_class => (
     is  => 'rw',
     isa => 'ClassName',
@@ -80,6 +99,58 @@ has box => (
             fields    => \@fields,
             format    => $format,
             indexes   => \@indexes,
+        );
+    },
+);
+
+has function_class => (
+    is  => 'rw',
+    isa => 'ClassName',
+    default => 'MR::Tarantool::Box::XS::Function',
+);
+
+has insert_box => (
+    is  => 'rw',
+    isa => 'Maybe[MR::Tarantool::Box::Record::Trait::Class::Box::Function]',
+    lazy    => 1,
+    default => sub {
+        my ($self) = @_;
+        my $name = $self->override_by_lua->{insert} or return;
+        my (@fields, $format);
+        foreach my $attr ($self->get_all_fields()) {
+            push @fields, $attr->name;
+            $format .= $attr->format;
+        }
+        return $self->function_class->new(
+            iproto     => $self->_iproto,
+            name       => $name,
+            in_fields  => \@fields,
+            in_format  => $format,
+            out_fields => \@fields,
+            out_format => $format,
+        );
+    },
+);
+
+has delete_box => (
+    is  => 'rw',
+    isa => 'Maybe[MR::Tarantool::Box::Record::Trait::Class::Box::Function]',
+    lazy    => 1,
+    default => sub {
+        my ($self) = @_;
+        my $name = $self->override_by_lua->{delete} or return;
+        my (@fields, $format);
+        foreach my $attr ($self->get_all_fields()) {
+            push @fields, $attr->name;
+            $format .= $attr->format;
+        }
+        return $self->function_class->new(
+            iproto     => $self->_iproto,
+            name       => $name,
+            in_fields  => [ $self->primary_key ],
+            in_format  => $self->get_attribute($self->primary_key)->format,
+            out_fields => \@fields,
+            out_format => $format,
         );
     },
 );

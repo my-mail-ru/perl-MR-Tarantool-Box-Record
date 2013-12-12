@@ -1,13 +1,13 @@
 package MR::Tarantool::Box::Record;
 
-use Mouse ();
+use Mouse qw/confess/;
 use Mouse::Exporter;
 use Mouse::Util::MetaRole;
 use MR::Tarantool::Box::Record::Object;
 use MR::Tarantool::Box::Record::Trait::Class;
 
 Mouse::Exporter->setup_import_methods(
-    as_is => [ 'iproto', 'namespace', 'shard_by', 'has_field', 'has_field_object', 'has_index', 'has_index_part' ],
+    as_is => [ 'iproto', 'namespace', 'shard_by', 'override_by_lua', 'has_field', 'has_field_object', 'has_index', 'has_index_part' ],
     also  => 'Mouse',
 );
 
@@ -33,6 +33,11 @@ sub namespace {
 
 sub shard_by (&) {
     caller->meta->shard_by(@_);
+}
+
+sub override_by_lua ($$) {
+    confess "Only 'insert' and 'delete' operations can be overrided" unless $_[0] eq 'insert' || $_[0] eq 'delete';
+    caller->meta->override_by_lua->{$_[0]} = $_[1];
 }
 
 sub has_field {

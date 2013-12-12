@@ -158,75 +158,116 @@ sub select {
 }
 
 sub insert {
-    my ($self) = @_;
-    confess "Can't insert readonly data" if $self->readonly;
-    @{$self->_update_ops} = ();
-    my $meta = $self->meta;
-    my %data = map { my $name = $_->name; $name => $self->$name } $meta->get_all_fields();
-    if (my $serialize = $meta->serialize) {
-        $serialize->([\%data]);
+    my ($class, $list, %opts) = ref $_[0] ? (ref $_[0], [ shift ], @_) : @_;
+    my @request;
+    my $meta = $class->meta;
+    my $insert_box = $meta->insert_box;
+    foreach my $item (@$list) {
+        confess "Can't insert readonly data" if $item->readonly;
+        @{$item->_update_ops} = ();
+        my %data = map { my $name = $_->name; $name => $item->$name } $meta->get_all_fields();
+        if (my $serialize = $meta->serialize) {
+            $serialize->([\%data]);
+        }
+        my $shard_num = $item->shard_num;
+        push @request, {
+            %opts,
+            type  => $insert_box ? 'call' : 'insert',
+            tuple => \%data,
+            $shard_num ? (shard_num => $shard_num) : (),
+        };
     }
-    my $shard_num = $self->shard_num;
-    my $response = $meta->box->do({
-        type  => 'insert',
-        tuple => \%data,
-        $shard_num ? (shard_num => $shard_num) : (),
-    });
-    if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
-        my $class = ref $self;
-        my $data = join ', ', map sprintf("%s: %s", $_->name, $_->value_for_debug($data{$_->name})), $meta->get_all_fields();
-        confess "Failed to insert $class: $response->{error} [ $data ]";
-    }
+    my $box = $insert_box || $meta->box;
+    my $response = $box->bulk(\@request);
+    my @failures = map {
+        my $tuple = $request[$_]->{tuple};
+        my $data = join ', ', map sprintf("%s: %s", $_->name, $_->value_for_debug($tuple->{$_->name})), $meta->get_all_fields();
+        "$response->[$_]->{error}: [ $data ]";
+    } grep { $response->[$_]->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK } (0 .. $#$response);
+    confess "Failed to insert $class: " . join(", ", @failures) if @failures;
     return;
 }
 
 sub update {
-    my ($self) = @_;
-    my $ops = $self->_update_ops;
-    return unless @$ops;
-    confess "Can't update readonly data" if $self->readonly;
-    my $meta = $self->meta;
-    if ($meta->serialize) {
-        foreach my $op (@$ops) {
-            my $attr = $meta->get_attribute($op->[0]);
-            if (my $serialize = $attr->serialize) {
-                local $_ = $op->[2];
-                $op->[2] = $serialize->($_);
+    my ($class, $list, %opts) = ref $_[0] ? (ref $_[0], [ shift ], @_) : @_;
+    my @request;
+    my $meta = $class->meta;
+    my $serialize = $meta->serialize;
+    my $primary_key = $meta->primary_key;
+    my $pkey_attr = $meta->get_attribute($primary_key);
+    my $pkey_serialize = $pkey_attr->serialize;
+    my @itemops;
+    foreach my $item (@$list) {
+        my $ops = $item->_update_ops;
+        next unless @$ops;
+        confess "Can't update readonly data" if $item->readonly;
+        push @itemops, $ops;
+        if ($serialize) {
+            $ops = [ @$ops ];
+            foreach my $op (@$ops) {
+                my $attr = $meta->get_attribute($op->[0]);
+                if (my $serialize = $attr->serialize) {
+                    local $_ = $op->[2];
+                    $op->[2] = $serialize->($_);
+                }
             }
         }
+        my $key = $item->$primary_key;
+        if ($pkey_serialize) {
+            local $_ = $key;
+            $key = $pkey_serialize->($_);
+        }
+        my $shard_num = $item->shard_num;
+        push @request, {
+            %opts,
+            type => 'update',
+            key  => $key,
+            ops  => $ops,
+            $shard_num ? (shard_num => $shard_num) : (),
+        };
     }
-    my $primary_key = $meta->primary_key;
-    my $shard_num = $self->shard_num;
-    my $response = $meta->box->do({
-        type => 'update',
-        key  => $self->$primary_key,
-        ops  => $ops,
-        $shard_num ? (shard_num => $shard_num) : (),
-    });
-    @$ops = ();
-    if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
-        my $class = ref $self;
-        confess "Failed to update $class: $response->{error}";
+    my $response = $meta->box->bulk(\@request);
+    my @failures;
+    foreach (0 .. $#$response) {
+        if ($response->[$_]->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK) {
+            @{$itemops[$_]} = ();
+        } else {
+            push @failures, sprintf "%s [ %s: %s ][ %s ]", $response->[$_]->{error}, $primary_key, $pkey_attr->value_for_debug($request[$_]->{key}),
+                join(", ", map sprintf("%s %s %s", $_->[0], $_->[1], $meta->get_attribute($_->[0])->value_for_debug($_->[2])), @{$request[$_]->{ops}});
+        }
     }
+    confess "Failed to update $class: " . join(", ", @failures) if @failures;
     return;
 }
 
 sub delete {
-    my ($self) = @_;
-    confess "Can't delete readonly data" if $self->readonly;
-    @{$self->_update_ops} = ();
-    my $meta = $self->meta;
+    my ($class, $list, %opts) = ref $_[0] ? (ref $_[0], [ shift ], @_) : @_;
+    my @request;
+    my $meta = $class->meta;
+    my $delete_box = $meta->delete_box;
     my $primary_key = $meta->primary_key;
-    my $shard_num = $self->shard_num;
-    my $response = $meta->box->do({
-        type => 'delete',
-        key  => $self->$primary_key,
-        $shard_num ? (shard_num => $shard_num) : (),
-    });
-    if ($response->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK) {
-        my $class = ref $self;
-        confess "Failed to delete $class: $response->{error}";
+    my $pkey_attr = $meta->get_attribute($primary_key);
+    my $pkey_serialize = $pkey_attr->serialize;
+    foreach my $item (@$list) {
+        confess "Can't delete readonly data" if $item->readonly;
+        @{$item->_update_ops} = ();
+        my $key = $item->$primary_key;
+        if ($pkey_serialize) {
+            local $_ = $key;
+            $key = $pkey_serialize->($_);
+        }
+        my $shard_num = $item->shard_num;
+        push @request, {
+            %opts,
+            $delete_box ? (type => 'call', tuple => [ $key ]) : (type => 'delete', key => $key),
+            $shard_num ? (shard_num => $shard_num) : (),
+        };
     }
+    my $box = $delete_box || $meta->box;
+    my $response = $box->bulk(\@request);
+    my @failures = map sprintf("%s [ %s: %s ]", $response->[$_]->{error}, $primary_key, $pkey_attr->value_for_debug($delete_box ? $request[$_]->{tuple}->[0] : $request[$_]->{key})),
+        grep { $response->[$_]->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK } (0 .. $#$response);
+    confess "Failed to delete $class: " . join(", ", @failures) if @failures;
     return;
 }
 
