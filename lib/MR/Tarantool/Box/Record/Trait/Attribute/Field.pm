@@ -5,7 +5,7 @@ use Mouse::Util::TypeConstraints;
 enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( Q q L l S s C c & $ );
 my %SIZEOF = (Q => 8, q => 8, L => 4, l => 4, S => 2, s => 2, C => 1, c => 1, '&' => undef, '$' => undef);
 
-my $mutator_type = enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec );
+my $mutator_type = enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec add and xor or set_bit clear_bit );
 subtype 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef' => as 'HashRef' => where {
     foreach (keys %$_) {
         return 0 unless $mutator_type->check($_);
@@ -149,8 +149,10 @@ after install_accessors => sub {
 
 {
     my %op_alias = (
-        inc => 'num_add',
-        dec => 'num_sub',
+        inc       => 'num_add',
+        dec       => 'num_sub',
+        set_bit   => 'bit_set',
+        clear_bit => 'bit_clear',
     );
 
     sub _install_mutators {
@@ -162,8 +164,45 @@ after install_accessors => sub {
         foreach my $mutator (keys %mutators) {
             my $method = $mutators{$mutator};
             my $op = $op_alias{$mutator} || $mutator;
-            my $sub = $mutator eq 'inc' || $mutator eq 'dec' ? sub { push @{$_[0]->_update_ops}, [ $field, $op, @_ == 1 ? 1 : $_[1] ] }
-                : sub { push @{$_[0]->_update_ops}, [ $field, $op, $_[1] ] };
+            my $sub = $mutator eq 'set' ? sub { $_[0]->$field($_[1]) }
+                : $mutator eq 'add' ? sub {
+                    $_[0]->$field($_[0]->$field + $_[1]);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $_[1] ];
+                    return;
+                }
+                : $mutator eq 'inc' ? sub {
+                    my $v = @_ == 1 ? 1 : $_[1];
+                    $_[0]->$field($_[0]->$field + $v);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $v ];
+                    return;
+                }
+                : $mutator eq 'dec' ? sub {
+                    my $v = @_ == 1 ? 1 : $_[1];
+                    $_[0]->$field($_[0]->$field - $v);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $v ];
+                    return;
+                }
+                : $mutator eq 'and' ? sub {
+                    $_[0]->$field($_[0]->$field & $_[1]);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $_[1] ];
+                    return;
+                }
+                : $mutator eq 'set_bit' || $mutator eq 'or' ? sub {
+                    $_[0]->$field($_[0]->$field | $_[1]);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $_[1] ];
+                    return;
+                }
+                : $mutator eq 'clear_bit' ? sub {
+                    $_[0]->$field($_[0]->$field & ~$_[1]);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $_[1] ];
+                    return;
+                }
+                : $mutator eq 'xor' ? sub {
+                    $_[0]->$field($_[0]->$field ^ $_[1]);
+                    $_[0]->_update_ops->[-1] = [ $field, $op, $_[1] ];
+                    return;
+                }
+                : confess "Unknown mutator: $mutator";
             $associated_class->add_method($method, $sub);
             $self->associate_method($method);
         }
@@ -176,7 +215,7 @@ sub _canonicalize_mutators {
     my $mutators = $self->mutators;
     if (ref $mutators eq 'ARRAY') {
         my $field = $self->name;
-        return map { $_ => "${_}_${field}" } @$mutators;
+        return map { $_ => /^(\w+)_(\w+)$/ ? "$1_${field}_$2" : "${_}_${field}" } @$mutators;
     } else {
         return %$mutators;
     }
