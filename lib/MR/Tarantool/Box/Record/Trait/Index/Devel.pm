@@ -45,7 +45,7 @@ has storage_size => (
         map({ $_ => 'NUM64' } qw/Q q/),
         map({ $_ => 'NUM' } qw/L l/),
         map({ $_ => 'NUM16' } qw/S s/),
-        map({ $_ => 'STR' } qw/& $/),
+        map({ $_ => 'STR' } qw/& $ < >/),
     );
 
     sub index_field_type {

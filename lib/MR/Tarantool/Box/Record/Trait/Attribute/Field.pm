@@ -2,8 +2,8 @@ package MR::Tarantool::Box::Record::Trait::Attribute::Field;
 
 use Mouse::Util::TypeConstraints;
 
-enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( Q q L l S s C c & $ );
-my %SIZEOF = (Q => 8, q => 8, L => 4, l => 4, S => 2, s => 2, C => 1, c => 1, '&' => undef, '$' => undef);
+enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Format' => qw( Q q L l S s C c & $ < > );
+my %SIZEOF = (Q => 8, q => 8, L => 4, l => 4, S => 2, s => 2, C => 1, c => 1, '&' => undef, '$' => undef, '<' => undef, '>' => undef);
 
 my $mutator_type = enum 'MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator' => qw( set inc dec add and xor or set_bit clear_bit );
 subtype 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef' => as 'HashRef' => where {
@@ -228,7 +228,7 @@ sub is_number {
 
 sub value_for_debug {
     my ($self, $value) = @_;
-    return $self->is_number() ? $value : Data::Dumper::qquote($value, $self->format eq '$' ? 'utf8' : undef);
+    return $self->is_number() ? $value : Data::Dumper::qquote($value, $self->format =~ /^[\$<]$/ ? 'utf8' : undef);
 }
 
 no Mouse::Role;
