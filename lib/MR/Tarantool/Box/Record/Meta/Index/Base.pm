@@ -97,7 +97,7 @@ has prepare_keys => (
                 $keys = [
                     map {
                         ref $_ eq 'ARRAY'
-                            ? do { my $f = $_; [ map { $serialize[$_] ? $serialize[$_]->($f->[$_]) : $f->[$_] } (0 .. $#$f) ] }
+                            ? do { my $f = $_; [ map { my $s = $serialize[$_]; $s ? do { local $_ = $f->[$_]; $s->($_) } : $f->[$_] } (0 .. $#$f) ] }
                             : $serialize[0] ? $serialize[0]->($_) : $_
                     } @$keys
                 ];
