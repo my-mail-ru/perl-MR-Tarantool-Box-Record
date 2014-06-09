@@ -57,7 +57,7 @@ has multifield => (
 
 has 'shard_by' => (
     is  => 'ro',
-    isa => 'CodeRef | Str',
+    isa => 'Maybe[CodeRef|Str]',
 );
 
 has fields_attrs => (
