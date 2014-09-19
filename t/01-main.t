@@ -1,5 +1,6 @@
 use strict;
 use warnings;
+use lib 't/lib';
 use Test::More tests => 4;
 use T::Dispatch;
 use T::Shard;
@@ -9,8 +10,8 @@ is($user->Email, 'my_testing100@mail.ru', "SelectByID");
 $user = T::Dispatch->SelectByEmail('my_testing100@mail.ru');
 is($user->ID, 158809549, "SelectByEmail");
 
-my $users = T::Shard->SelectByBirthday([1, 2], shard_num => 'all', limit => 10);
+my $users = T::Shard->SelectByBi([1, 2], shard_num => 'all', limit => 10);
 is(scalar @$users, 10 * T::Shard->meta->box->iproto->get_shard_count(), "SelectByBi");
 
-$users = T::Shard->SelectByBirthdayMonth(2, shard_num => 'all', limit => 10);
+$users = T::Shard->SelectByBiPart(2, shard_num => 'all', limit => 10);
 is(scalar @$users, 10 * T::Shard->meta->box->iproto->get_shard_count(), "SelectByBiPart");
