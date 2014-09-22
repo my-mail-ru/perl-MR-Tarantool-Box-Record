@@ -21,8 +21,9 @@ has id => (
     default => sub {
         my ($self) = @_;
         my $field = $self->associated_field;
-        confess "'sequence_id' should be configured to use sequence" unless $field->primary_key;
-        return $field->associated_class->namespace;
+        my $associated_class = $field->associated_class;
+        confess "'sequence_id' should be configured to use sequence" unless grep { $field->name eq $_ } @{$associated_class->primary_key->fields};
+        return $associated_class->namespace;
     },
 );
 

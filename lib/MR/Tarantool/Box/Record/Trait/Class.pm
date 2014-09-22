@@ -54,12 +54,12 @@ has namespace => (
 
 has primary_key => (
     is  => 'ro',
-    isa => 'Str',
+    isa => 'MR::Tarantool::Box::Record::Meta::Index',
     lazy    => 1,
     default => sub {
         my ($self) = @_;
-        foreach my $attr ($self->get_all_fields()) {
-            return $attr->name if $attr->primary_key;
+        foreach my $index (@{$self->indexes}) {
+            return $index if $index->primary_key;
         }
         die sprintf "No primary_key defined for %s", $self->name;
     },
@@ -147,8 +147,8 @@ has delete_box => (
         return $self->function_class->new(
             iproto     => $self->_iproto,
             name       => $name,
-            in_fields  => [ $self->primary_key ],
-            in_format  => $self->get_attribute($self->primary_key)->format,
+            in_fields  => $self->primary_key->fields,
+            in_format  => join('', map $_->format, @{$self->primary_key->fields_attrs}),
             out_fields => \@fields,
             out_format => $format,
         );
@@ -226,14 +226,13 @@ has sequence_iproto => (
     is  => 'rw',
     isa => 'MR::IProto::XS',
     lazy    => 1,
-    default => sub { confess "'sequence_iproto' should be configured to use sequences" },
+    default => sub { $_[0]->_iproto },
 );
 
 has sequence_namespace => (
     is  => 'rw',
     isa => 'Int',
-    lazy    => 1,
-    default => sub { confess "'sequence_namespace' should be configured to use sequences" },
+    default => 0,
 );
 
 sub set_iproto {
@@ -302,7 +301,7 @@ sub add_index {
         confess "Index number $number already exists"
             if defined $indexes->[$number] && $indexes->[$number]->name ne $index->name;
     } else {
-        for ($number = 0; $number <= @$indexes; $number++) {
+        for ($number = 1; $number <= @$indexes; $number++) {
             last unless defined $indexes->[$number];
         }
         $index->number($number);

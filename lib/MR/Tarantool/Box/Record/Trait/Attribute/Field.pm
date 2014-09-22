@@ -43,11 +43,6 @@ has index => (
     isa => 'MR::Tarantool::Box::Record::Meta::Index',
 );
 
-has primary_key => (
-    is  => 'ro',
-    isa => 'Bool',
-);
-
 has sequence => (
     is  => 'ro',
     isa => 'MR::Tarantool::Box::Record::Meta::Sequence',
@@ -85,6 +80,13 @@ has max_size => (
     default => sub { $_[0]->size },
 );
 
+has ascii => (
+    is  => 'ro',
+    isa => 'Bool',
+    lazy    => 1,
+    default => 0,
+);
+
 {
     my %default = (
         map({ $_ => 0 } qw( Q q L l S s C c )),
@@ -104,9 +106,8 @@ has max_size => (
         $args->{trigger} = $trigger;
 
         unless (blessed $args->{index}) {
-            my %index_args = map { $_ => delete $args->{$_} } grep exists $args->{$_}, qw/uniq selector shard_by/;
+            my %index_args = map { $_ => delete $args->{$_} } grep exists $args->{$_}, qw/primary_key uniq selector shard_by/;
             $index_args{name} = delete $args->{index} if exists $args->{index};
-            $index_args{default} = $args->{primary_key} if exists $args->{primary_key};
             $index_args{number} = delete $args->{index_number} if exists $args->{index_number};
             if (%index_args) {
                 $index_args{fields} = [$name];
@@ -126,7 +127,7 @@ has max_size => (
             $args->{builder} = $args->{sequence}->next_method;
         }
 
-        if (!$args->{required} && !$args->{primary_key} && !exists $args->{default} && !exists $args->{builder} && exists $default{$args->{format}}) {
+        if (!$args->{required} && !exists $args->{default} && !exists $args->{builder} && exists $default{$args->{format}}) {
             $args->{default} = $default{$args->{format}};
         }
 
@@ -228,7 +229,7 @@ sub is_number {
 
 sub value_for_debug {
     my ($self, $value) = @_;
-    return $self->is_number() ? $value : Data::Dumper::qquote($value, $self->format =~ /^[\$<]$/ ? 'utf8' : undef);
+    return !defined $value ? 'undef' : $self->is_number() && $value =~ /^-?\d+$/ ? $value : Data::Dumper::qquote($value, $self->format =~ /^[\$<]$/ ? 'utf8' : undef);
 }
 
 no Mouse::Role;

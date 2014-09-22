@@ -21,6 +21,7 @@ has max_storage_size => (
     lazy     => 1,
     default  => sub {
         my $size = $_[0]->max_size;
+        $size *= 2 if $_[0]->format eq '$' && !$_[0]->ascii && defined $size;
         $size += int($size / 0x80) + 1 if defined $size;
         return $size;
     },

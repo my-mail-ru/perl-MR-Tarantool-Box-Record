@@ -194,8 +194,7 @@ sub update {
     my $meta = $class->meta;
     my $serialize = $meta->serialize;
     my $primary_key = $meta->primary_key;
-    my $pkey_attr = $meta->get_attribute($primary_key);
-    my $pkey_serialize = $pkey_attr->serialize;
+    my $prepare_key = $primary_key->prepare_key;
     my @itemops;
     foreach my $item (@$list) {
         my $ops = $item->_update_ops;
@@ -212,11 +211,7 @@ sub update {
                 }
             }
         }
-        my $key = $item->$primary_key;
-        if ($pkey_serialize) {
-            local $_ = $key;
-            $key = $pkey_serialize->($_);
-        }
+        my $key = $prepare_key->($item);
         my $shard_num = $item->shard_num;
         push @request, {
             %opts,
@@ -232,7 +227,7 @@ sub update {
         if ($response->[$_]->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK) {
             @{$itemops[$_]} = ();
         } else {
-            push @failures, sprintf "%s [ %s: %s ][ %s ]", $response->[$_]->{error}, $primary_key, $pkey_attr->value_for_debug($request[$_]->{key}),
+            push @failures, sprintf "%s [ %s ]", $response->[$_]->{error}, $primary_key->key_for_debug($request[$_]->{key}),
                 join(", ", map sprintf("%s %s %s", $_->[0], $_->[1], $meta->get_attribute($_->[0])->value_for_debug($_->[2])), @{$request[$_]->{ops}});
         }
     }
@@ -246,16 +241,11 @@ sub delete {
     my $meta = $class->meta;
     my $delete_box = $meta->delete_box;
     my $primary_key = $meta->primary_key;
-    my $pkey_attr = $meta->get_attribute($primary_key);
-    my $pkey_serialize = $pkey_attr->serialize;
+    my $prepare_key = $primary_key->prepare_key;
     foreach my $item (@$list) {
         confess "Can't delete readonly data" if $item->readonly;
         @{$item->_update_ops} = ();
-        my $key = $item->$primary_key;
-        if ($pkey_serialize) {
-            local $_ = $key;
-            $key = $pkey_serialize->($_);
-        }
+        my $key = $prepare_key->($item);
         my $shard_num = $item->shard_num;
         push @request, {
             %opts,
@@ -265,7 +255,7 @@ sub delete {
     }
     my $box = $delete_box || $meta->box;
     my $response = $box->bulk(\@request);
-    my @failures = map sprintf("%s [ %s: %s ]", $response->[$_]->{error}, $primary_key, $pkey_attr->value_for_debug($delete_box ? $request[$_]->{tuple}->[0] : $request[$_]->{key})),
+    my @failures = map sprintf("%s %s", $response->[$_]->{error}, $primary_key->key_for_debug($delete_box ? $request[$_]->{tuple} : $request[$_]->{key})),
         grep { $response->[$_]->{error} != MR::Tarantool::Box::XS::ERR_CODE_OK } (0 .. $#$response);
     confess "Failed to delete $class: " . join(", ", @failures) if @failures;
     return;

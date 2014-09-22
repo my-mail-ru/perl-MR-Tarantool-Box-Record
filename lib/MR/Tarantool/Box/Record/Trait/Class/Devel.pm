@@ -18,16 +18,17 @@ sub approximate_storage_size {
             $max = undef;
         }
     }
-    return ($min / (1 - $fragmentation) + $index_size, $max / (1 - $fragmentation) + $index_size);
+    return ($min / (1 - $fragmentation) + $index_size, defined $max ? $max / (1 - $fragmentation) + $index_size : undef);
 }
 
 sub print_approximate_storage_size {
     my ($self, $count) = @_;
     $count = 1 unless defined $count;
     my ($min, $max) = $self->approximate_storage_size();
+    my $avg = defined $max ? sprintf "%.02f Gb", ($min + $max / 2) * $count / (1024 * 1024 * 1024) : 'unknown';
     $min = sprintf "%.02f Gb", $min * $count / (1024 * 1024 * 1024);
     $max = defined $max ? sprintf "%.02f Gb", $max * $count / (1024 * 1024 * 1024) : 'inf';
-    print "$min .. $max\n";
+    print "$min .. $max ~ $avg\n";
     return;
 }
 

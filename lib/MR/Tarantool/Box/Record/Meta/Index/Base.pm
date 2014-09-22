@@ -79,7 +79,7 @@ has prepare_keys => (
         my @name = map $_->name, @$attrs;
         my @type = map $_->type_constraint, @$attrs;
         my @serialize = map $_->serialize, @$attrs;
-        return unless @type || @serialize;
+        return unless grep $_, @type, @serialize;
         return sub {
             my ($keys) = @_;
             if (@type) {
@@ -107,6 +107,30 @@ has prepare_keys => (
     },
 );
 
+has prepare_key => (
+    is  => 'ro',
+    isa => 'CodeRef',
+    init_arg => undef,
+    lazy     => 1,
+    default  => sub {
+        my ($self) = @_;
+        my $attrs = $self->fields_attrs;
+        my @name = map $_->name, @$attrs;
+        my @serialize = map $_->serialize, @$attrs;
+        if (grep $_, @serialize) {
+            return sub {
+                my ($record) = @_;
+                return { map { my $n = $name[$_]; my $s = $serialize[$_]; my $v = $record->$n; ($n => $s ? do { local $_ = $v; $s->($_) } : $v) } (0 .. $#name) };
+            };
+        } else {
+            return sub {
+                my ($record) = @_;
+                return { map { $_ => $record->$_ } @name };
+            };
+        }
+    },
+);
+
 sub install_selectors {
     my ($self) = @_;
     my $name = $self->name;
@@ -121,6 +145,16 @@ sub install_selectors {
 sub associate_method {
     my ($self, $method_name) = @_;
     return;
+}
+
+sub key_for_debug {
+    my ($self, $key) = @_;
+    $key = [ $key ] unless ref $key;
+    my $hash = ref $key eq 'HASH';
+    return sprintf '[ %s ]', join ', ', map {
+        my $value = $hash ? $key->{$_->name} : $key->[$_->number];
+        sprintf "%s: %s", $_->name, $_->value_for_debug($value);
+    } @{$self->fields_attrs};
 }
 
 no Mouse;
