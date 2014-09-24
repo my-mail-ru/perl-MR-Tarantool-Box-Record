@@ -81,27 +81,35 @@ sub install_methods {
     my $field_name = $self->field;
     my $id = $self->id,
     my $associated_class = $self->associated_field->associated_class;
+    my $microsharding = $self->associated_field->microsharding;
+    my $bits = $associated_class->microshard_bits;
     $associated_class->add_method($self->next_method, sub {
+        my $shard_num = $microsharding ? $_[0]->shard_num : undef;
         my $response = $box->do({
             type => 'update',
             key  => $id,
             ops  => [ [ value => num_add => 1 ] ],
             want_result => 1,
+            $microsharding ? (shard_num => $shard_num) : (),
         });
         confess "Failed to get next sequence value for '$field_name': $response->{error}"
             unless $response->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK;
         confess "Sequence for '$field_name' not found in box" unless $response->{tuple};
-        return $response->{tuple}->{value};
+        my $value = $response->{tuple}->{value};
+        return $microsharding ? (($value << $bits) | $shard_num) : $value;
     });
     $associated_class->add_method($self->max_method, sub {
+        my $shard_num = $microsharding ? $_[1] : undef;
         my $response = $box->do({
             type => 'select',
             keys => [ $id ],
+            $microsharding ? (shard_num => $shard_num) : (),
         });
         confess "Failed to get current sequence value for '$field_name': $response->{error}"
             unless $response->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK;
         confess "Sequence for '$field_name' not found in box" unless @{$response->{tuples}};
-        return $response->{tuples}->[0]->{value};
+        my $value = $response->{tuple}->{value};
+        return $microsharding ? (($value << $bits) | $shard_num) : $value;
     });
     $self->associate_method($self->next_method);
     $self->associate_method($self->max_method);
@@ -115,14 +123,19 @@ sub associate_method {
 
 sub initialize_sequence {
     my ($self) = @_;
-    my $response = $self->box->do({
-        type   => 'insert',
-        action => 'add',
-        tuple  => [ $self->id, 0 ],
-    });
+    my $bits = $self->associated_field->associated_class->microshard_bits;
+    my $max_shard = 1 << $bits;
+    my @request = map +{
+        type      => 'insert',
+        action    => 'add',
+        tuple     => [ $self->id, 0 ],
+        shard_num => $_,
+    }, (1 .. $max_shard);
+    my $response = $self->box->bulk(\@request);
     my $field_name = $self->field;
-    confess "Failed to initialize sequence for '$field_name': $response->{error}"
-        unless $response->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK;
+    my @error = map { "$request[$_]->{shard_num}: $response->[$_]->{error}" }
+        grep { $response->[$_] != MR::Tarantool::Box::XS::ERR_CODE_OK } (0 .. $#request);
+    confess "Failed to initialize sequence for '$field_name': " . join ', ', @error if @error;
     return;
 }
 

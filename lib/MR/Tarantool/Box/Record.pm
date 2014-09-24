@@ -7,7 +7,7 @@ use MR::Tarantool::Box::Record::Object;
 use MR::Tarantool::Box::Record::Trait::Class;
 
 Mouse::Exporter->setup_import_methods(
-    as_is => [ 'iproto', 'namespace', 'shard_by', 'override_by_lua', 'has_field', 'has_field_object', 'has_index', 'has_index_part' ],
+    as_is => [ 'iproto', 'namespace', 'microshard', 'shard_by', 'override_by_lua', 'has_field', 'has_field_object', 'has_index', 'has_index_part' ],
     also  => 'Mouse',
 );
 
@@ -29,6 +29,10 @@ sub iproto {
 
 sub namespace {
     caller->meta->namespace(@_);
+}
+
+sub microshard ($$) {
+    caller->meta->microshard(@_);
 }
 
 sub shard_by (&) {

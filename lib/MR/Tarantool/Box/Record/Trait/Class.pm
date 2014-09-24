@@ -6,6 +6,7 @@ use MR::Tarantool::Box::XS;
 use MR::Tarantool::Box::Record::Meta::Index;
 use MR::Tarantool::Box::Record::Meta::Index::Part;
 use List::MoreUtils qw/uniq/;
+use POSIX qw/ceil/;
 
 use Mouse::Util::TypeConstraints;
 
@@ -50,6 +51,17 @@ has _iproto => (
 has namespace => (
     is  => 'rw',
     isa => 'Int',
+);
+
+has microshard_field => (
+    is  => 'rw',
+    isa => 'Str',
+);
+
+has microshard_bits => (
+    is  => 'rw',
+    isa => 'Int',
+    default => 0,
 );
 
 has primary_key => (
@@ -182,6 +194,42 @@ foreach my $attrname ('serialize', 'deserialize') {
     );
 }
 
+has validate => (
+    is  => 'ro',
+    isa => 'Maybe[CodeRef]',
+    lazy    => 1,
+    default => sub {
+        my ($self) = @_;
+        my $bits = $self->microshard_bits
+            or return;
+        my $mask = (1 << $bits) - 1;
+        my $quarts = ceil($bits / 4);
+        my (@int, @str);
+        foreach my $field (grep $_->microsharding, $self->get_all_fields()) {
+            if ($field->format eq '$' || $field->format eq '&') {
+                push @str, $field->name;
+            } else {
+                push @int, $field->name;
+            }
+        }
+        return unless @int || @str;
+        return sub {
+            my ($data, $shard_num) = @_;
+            foreach my $f (@int) {
+                confess "Value of field $f doesn't match shard_num ($data->{$f} not in $shard_num)"
+                    unless ($data->{$f} & $mask) == $shard_num;
+            }
+            foreach my $f (@str) {
+                confess "Value of field $f is too short" unless length $data->{$f} >= $quarts;
+                my $v = reverse substr $data->{$f}, 0, $quarts;
+                confess "Value of field $f doesn't match shard_num (\"$data->{$f}\" not in $shard_num)"
+                    unless ($v & $mask) == $shard_num;
+            }
+            return;
+        };
+    },
+);
+
 has fields => (
     is  => 'ro',
     isa => 'ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field]',
@@ -239,6 +287,18 @@ sub set_iproto {
     my $self = shift;
     my $iproto = @_ == 1 ? shift : $self->iproto_class->new(@_);
     $self->_iproto($iproto);
+    return;
+}
+
+sub microshard {
+    my ($self, $field, $bits) = @_;
+    $self->microshard_field($field);
+    $self->microshard_bits($bits);
+    my $mask = (1 << $bits) - 1;
+    $self->add_attribute('+shard_num',
+        lazy    => 1,
+        default => sub { $_[0]->$field & $mask },
+    );
     return;
 }
 

@@ -48,6 +48,13 @@ has sequence => (
     isa => 'MR::Tarantool::Box::Record::Meta::Sequence',
 );
 
+has microsharding => (
+    is  => 'ro',
+    isa => 'Bool',
+    lazy    => 1,
+    default => sub { $_[0]->associated_class->microshard_bits && $_[0]->index ? 1 : 0 },
+);
+
 has mutators => (
     is  => 'rw',
     isa => 'MR::Tarantool::Box::Record::Trait::Attribute::Field::MutatorHashRef | ArrayRef[MR::Tarantool::Box::Record::Trait::Attribute::Field::Mutator]',
