@@ -252,7 +252,7 @@ sub delete {
         my $shard_num = $item->shard_num;
         push @request, {
             %opts,
-            $delete_box ? (type => 'call', tuple => [ $key ]) : (type => 'delete', key => $key),
+            $delete_box ? (type => 'call', tuple => $key) : (type => 'delete', key => $key),
             $shard_num ? (shard_num => $shard_num) : (),
         };
     }
