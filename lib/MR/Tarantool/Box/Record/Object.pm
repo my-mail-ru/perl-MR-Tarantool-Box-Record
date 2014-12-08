@@ -136,9 +136,6 @@ sub select {
             }
         }
     }
-    if (my $limit = $opts{limit}) {
-        $#alltuples = $limit - 1 if @alltuples > $limit;
-    }
     if (my $deserialize = $meta->deserialize) {
         $deserialize->(\@alltuples);
     }
