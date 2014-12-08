@@ -88,7 +88,7 @@ sub install_methods {
         my $response = $box->do({
             type => 'update',
             key  => $id,
-            ops  => [ [ value => num_add => 65536 ] ],
+            ops  => [ [ value => num_add => $microsharding ? 65536 : 1 ] ], # FIXME
             want_result => 1,
             $microsharding ? (shard_num => $shard_num) : (),
         });
