@@ -6,11 +6,10 @@ Release:        1%{?dist}
 
 Summary:        ActiveRecord for a tuple of Tarantool/Octopus
 License:        BSD
-Group:          MAIL.RU
+Group:          MAILRU
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-buildroot
 BuildArch:      noarch
-BuildRequires:  git
 Requires:       perl-Mouse
 Requires:       perl-MR-IProto-XS >= 20130719.1722
 Requires:       perl-MR-Tarantool-Box-XS >= 20130719.1722
