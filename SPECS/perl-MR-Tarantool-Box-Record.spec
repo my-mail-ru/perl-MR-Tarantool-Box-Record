@@ -16,7 +16,7 @@ Requires:       perl-MR-Tarantool-Box-XS >= 20130719.1722
 Requires:       perl-List-MoreUtils
 
 %description
-ActiveRecord for a tuple of Tarantool/Octopus. Built from revision %{__gitrelease}.
+ActiveRecord for a tuple of Tarantool/Octopus. Built from revision %{__revision}.
 
 %prep
 %setup -n iproto/tarantool/record
