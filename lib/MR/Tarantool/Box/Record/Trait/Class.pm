@@ -410,12 +410,12 @@ sub get_all_fields {
 }
 
 sub initialize_sequence {
-    my ($self, $field_name) = @_;
+    my ($self, $field_name, $start_value) = @_;
     my $field = $self->get_attribute($field_name)
         or confess "Field $field_name not exists";
     my $sequence = $field->sequence
         or confess "Field $field_name has no sequence";
-    $sequence->initialize_sequence();
+    $sequence->initialize_sequence($start_value);
     return;
 }
 

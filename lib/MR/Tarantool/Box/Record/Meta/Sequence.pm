@@ -122,13 +122,14 @@ sub associate_method {
 }
 
 sub initialize_sequence {
-    my ($self) = @_;
+    my ($self, $start_value) = @_;
+    $start_value = 0 unless ( $start_value && $start_value =~ m/^\d+$/ );
     my $bits = $self->associated_field->associated_class->microshard_bits;
     my $max_shard = 1 << $bits;
     my @request = map +{
         type      => 'insert',
         action    => 'add',
-        tuple     => [ $self->id, 0 ],
+        tuple     => [ $self->id, $start_value ],
         shard_num => $_,
     }, (1 .. $max_shard);
     my $response = $self->box->bulk(\@request);
