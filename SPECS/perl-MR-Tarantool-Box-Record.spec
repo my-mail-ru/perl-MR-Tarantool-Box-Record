@@ -10,6 +10,7 @@ Group:          MAILRU
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-buildroot
 BuildArch:      noarch
+BuildRequires:  perl(ExtUtils::MakeMaker)
 Requires:       perl-Mouse
 Requires:       perl-MR-IProto-XS >= 20130719.1722
 Requires:       perl-MR-Tarantool-Box-XS >= 20130719.1722
