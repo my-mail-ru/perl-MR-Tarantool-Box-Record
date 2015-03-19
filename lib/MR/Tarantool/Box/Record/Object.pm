@@ -100,6 +100,7 @@ sub select {
             }
         }
     }
+    my $single = delete $opts{single};
     my $create = delete $opts{create};
     confess "option 'create => 1' should be used only with unique singlefield indexes" if $create && (!$uniq || $multifield);
     $opts{limit} = $index->default_limit if !exists $opts{limit} && $index->has_default_limit();
@@ -109,6 +110,7 @@ sub select {
     $opts{use_index} = $index->index;
     $opts{inplace} = 1;
     my @request = $shard_keys ? map +{ %opts, keys => $shard_keys->{$_}, shard_num => $_ }, keys %$shard_keys : { %opts, keys => $keys };
+    @request = map { my $r = $_; map +{ %$r, keys => [ $_ ] }, @{$r->{keys}} } @request if $single;
     my $response = $box->bulk(\@request);
     my @alltuples;
     foreach my $resp (@$response) {
