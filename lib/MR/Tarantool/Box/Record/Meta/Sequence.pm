@@ -108,7 +108,8 @@ sub install_methods {
         confess "Failed to get current sequence value for '$field_name': $response->{error}"
             unless $response->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK;
         confess "Sequence for '$field_name' not found in box" unless @{$response->{tuples}};
-        my $value = $response->{tuple}->{value};
+        confess "Select return more than one tuple for '$field_name'" if scalar @{$response->{tuples}} > 1;
+        my $value = $response->{tuples}->[0]->{value};
         return $microsharding ? (($value << $bits) | $shard_num) : $value;
     });
     $self->associate_method($self->next_method);
