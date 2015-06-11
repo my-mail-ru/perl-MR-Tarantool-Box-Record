@@ -20,7 +20,7 @@ Requires:       perl-List-MoreUtils
 ActiveRecord for a tuple of Tarantool/Octopus. Built from revision %{__revision}.
 
 %prep
-%setup -n iproto/tarantool/record
+%setup -n tarantoolbox-record
 
 %build
 %{__perl} Makefile.PL INSTALLDIRS=vendor
