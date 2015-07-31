@@ -29,28 +29,16 @@ has readonly => (
 has exists => (
     is  => 'ro',
     isa => 'Bool',
+    lazy    => 1,
     default => 0,
 );
 
 has _update_ops => (
     is  => 'ro',
     isa => 'ArrayRef',
+    lazy    => 1,
     default => sub { [] },
 );
-
-# dirty hack for trigger in old Mouse
-has _built => (
-    is  => 'rw',
-);
-
-sub BUILD {
-    my ($self) = @_;
-    $self->_init_new() unless $self->exists;
-    $self->_built(1);
-    return;
-}
-
-sub _init_new {}
 
 sub select {
     my ($class, $field, $keys, %opts) = @_;
@@ -112,10 +100,10 @@ sub select {
     my @request = $shard_keys ? map +{ %opts, keys => $shard_keys->{$_}, shard_num => $_ }, keys %$shard_keys : { %opts, keys => $keys };
     @request = map { my $r = $_; map +{ %$r, keys => [ $_ ] }, @{$r->{keys}} } @request if $single;
     my $response = $box->bulk(\@request);
-    my @alltuples;
+    my @list;
     foreach my $resp (@$response) {
         if ($resp->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK) {
-            my $tuples = $resp->{tuples};
+            my $tuples = delete $resp->{tuples}; # "delete" is important. it prevents considirable performance penalty in perl 5.8 on "bless" bellow caused by S_reset_amagic
             foreach my $tuple (@$tuples) {
                 $tuple->{shard_num} = $resp->{shard_num} if exists $resp->{shard_num};
                 $tuple->{replica} = 1 if $resp->{replica};
@@ -125,10 +113,10 @@ sub select {
                 my $key_field = $index->fields->[0];
                 my %found = map { $_->{$key_field} => 1 } @$tuples;
                 my @created = map $class->_create_default($key_field => $_), grep !$found{$_}, @{$resp->{keys}};
-                push @alltuples, @created;
+                push @list, @created;
                 $created = 1 if @created;
             }
-            push @alltuples, @$tuples;
+            push @list, @$tuples;
         } else {
             if ($noraise) {
                 my $count = @{$resp->{keys}};
@@ -139,12 +127,15 @@ sub select {
         }
     }
     if (my $deserialize = $meta->deserialize) {
-        $deserialize->(\@alltuples);
+        $deserialize->(\@list);
     }
     if (%$object_map && (my $object_tuples = $meta->object_tuples)) {
-        $object_tuples->(\@alltuples, $object_map);
+        $object_tuples->(\@list, $object_map);
     }
-    my @list = map $class->new($_), @alltuples;
+    foreach (@list) {
+        bless $_, $class;
+        $meta->_initialize_object($_, {}, 1);
+    }
     if ($created) {
         $_->insert() foreach grep !$_->exists, @list;
     }

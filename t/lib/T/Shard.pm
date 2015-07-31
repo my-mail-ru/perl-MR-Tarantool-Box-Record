@@ -14,6 +14,7 @@ has_field ID => (
     format => 'l',
     index  => 'primary',
     primary_key => 1,
+    selector    => 'SelectByID',
 );
 
 has_field Bi1 => 'L';

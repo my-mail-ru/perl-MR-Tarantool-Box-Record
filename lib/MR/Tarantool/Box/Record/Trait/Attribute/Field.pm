@@ -105,7 +105,7 @@ has ascii => (
 
         $args->{required} = 1 if $args->{primary_key} && !exists $args->{required};
 
-        my $trigger = sub { push @{$_[0]->_update_ops}, [ $name => set => $_[1] ] if $_[0]->_built };
+        my $trigger = sub { push @{$_[0]->_update_ops}, [ $name => set => $_[1] ] };
         if (my $orig_trigger = $args->{trigger}) {
             my $my_trigger = $trigger;
             $trigger = sub { $my_trigger->(@_); $orig_trigger->(@_) };
