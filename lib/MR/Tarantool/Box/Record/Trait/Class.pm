@@ -48,7 +48,7 @@ has _iproto => (
     isa => 'MR::IProto::XS',
 );
 
-has namespace => (
+has space => (
     is  => 'rw',
     isa => 'Int',
 );
@@ -107,7 +107,7 @@ has box => (
         }, @{$self->indexes};
         return $self->box_class->new(
             iproto    => $self->_iproto,
-            namespace => $self->namespace,
+            namespace => $self->space,
             fields    => \@fields,
             format    => $format,
             indexes   => \@indexes,

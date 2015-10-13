@@ -23,7 +23,7 @@ has id => (
         my $field = $self->associated_field;
         my $associated_class = $field->associated_class;
         confess "'sequence_id' should be configured to use sequence" unless grep { $field->name eq $_ } @{$associated_class->primary_key->fields};
-        return $associated_class->namespace;
+        return $associated_class->space;
     },
 );
 
@@ -34,7 +34,7 @@ has iproto => (
     default => sub { $_[0]->associated_field->associated_class->sequence_iproto },
 );
 
-has namespace => (
+has space => (
     is  => 'ro',
     isa => 'Int',
     lazy    => 1,
@@ -53,7 +53,7 @@ has box => (
         my $box_class = $field->associated_class->box_class;
         return $box_class->new(
             iproto    => $self->iproto,
-            namespace => $self->namespace,
+            namespace => $self->space,
             fields    => [qw/ id value /],
             format    => 'L' . $format,
             indexes   => [{ name => 'primary', keys => ['id'], default => 1 }],

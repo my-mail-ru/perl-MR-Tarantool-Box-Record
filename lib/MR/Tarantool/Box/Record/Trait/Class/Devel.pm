@@ -35,7 +35,7 @@ sub print_approximate_storage_size {
 sub print_storage_config {
     my ($self) = @_;
     printf "# %s\n", $self->name;
-    my $namespace = $self->namespace;
+    my $namespace = $self->space;
     printf "object_space[%s].enabled = 1\n", $namespace;
     foreach my $index (@{$self->indexes}) {
         printf "object_space[%s].index[%d].type = \"%s\"\n", $namespace, $index->number, $index->type;

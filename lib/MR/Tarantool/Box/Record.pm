@@ -28,7 +28,7 @@ sub iproto {
 }
 
 sub namespace {
-    caller->meta->namespace(@_);
+    caller->meta->space(@_);
 }
 
 sub microshard ($$) {
