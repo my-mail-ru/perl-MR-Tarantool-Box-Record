@@ -126,7 +126,6 @@ has ascii => (
             my %sequence_args = map { $_ => delete $args->{"sequence_$_"} } grep exists $args->{"sequence_$_"}, qw/id iproto namespace/;
             if (%sequence_args || delete $args->{sequence}) {
                 $sequence_args{field} = $name;
-                $sequence_args{space} = $sequence_args{namespace};
                 $args->{sequence} = MR::Tarantool::Box::Record::Meta::Sequence->new(\%sequence_args);
             }
         }
