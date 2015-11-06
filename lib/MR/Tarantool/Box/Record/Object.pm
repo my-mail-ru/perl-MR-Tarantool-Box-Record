@@ -254,6 +254,12 @@ sub delete {
     return;
 }
 
+sub get_dirty_fields {
+    my ($class, $list) = ref $_[0] ? (ref $_[0], [ shift ]) : @_;
+    my %changed_fields = map { $_->[0] => $_->[2] } @{$list->[0]->_update_ops};
+    return \%changed_fields;
+}
+
 sub _create_default {
     my ($class, $key, $value) = @_;
     return { $key => $value };
