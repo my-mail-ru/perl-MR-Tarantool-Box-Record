@@ -167,6 +167,7 @@ sub insert {
             %opts,
             type  => $insert_box ? 'call' : 'insert',
             tuple => \%data,
+            from  => 'master',
             $shard_num ? (shard_num => $shard_num) : (),
         };
     }
@@ -242,6 +243,7 @@ sub delete {
         my $shard_num = $item->shard_num;
         push @request, {
             %opts,
+            from  => 'master',
             $delete_box ? (type => 'call', tuple => $key) : (type => 'delete', key => $key),
             $shard_num ? (shard_num => $shard_num) : (),
         };
