@@ -3,9 +3,12 @@ package MR::Tarantool::Box::Record::Trait::Class;
 use Mouse::Role;
 use MR::IProto::XS;
 use MR::Tarantool::Box::XS;
+use MR::Tarantool::Box::Record::Object;
 use MR::Tarantool::Box::Record::Meta::Index;
 use MR::Tarantool::Box::Record::Meta::Index::Part;
+use Carp qw/cluck/;
 use List::MoreUtils qw/uniq/;
+use Scalar::Util qw/weaken/;
 use POSIX qw/ceil/;
 
 use Mouse::Util::TypeConstraints;
@@ -283,6 +286,101 @@ has sequence_namespace => (
     default => 0,
 );
 
+has select => (
+    is  => 'ro',
+    isa => 'CodeRef',
+    init_arg => undef,
+    lazy     => 1,
+    default  => sub {
+        my ($self) = @_;
+        my %select_request;
+        foreach my $index (@{$self->indexes}, @{$self->index_parts}) {
+            $select_request{$index->name} ||= $index->select_request;
+            $select_request{join ',', @{$index->fields}} ||= $index->select_request;
+        }
+        my $box = $self->box;
+        my $select_response = $self->select_response;
+        return sub {
+            my ($class, $field, $keys, %opts) = @_;
+            my %resp_opts = (
+                objects             => $opts{objects} ||= {},
+                create              => delete $opts{create},
+                noraise_unuvailable => delete $opts{noraise_unuvailable},
+            );
+            my $select_request = $select_request{$field}
+                or confess "Can't use field '$field' as an indexed field";
+            (my $request, $resp_opts{bulk}) = $select_request->($keys, %opts);
+            my $response = $box->bulk($request);
+            return $class->$select_response($response, %resp_opts);
+        }
+    },
+);
+
+has select_response => (
+    is  => 'ro',
+    isa => 'CodeRef',
+    init_arg => undef,
+    lazy     => 1,
+    default  => sub {
+        my ($self) = @_;
+        my $sharding = $self->box->iproto->get_shard_count() > 1;
+        my $deserialize = $self->deserialize;
+        my $object_tuples = $self->object_tuples;
+        my %uniq_field_by_index = map { $_->uniq && @{$_->fields} == 1 ? ($_->index => $_->fields->[0]) : () } @{$self->indexes};
+        weaken(my $meta = $self);
+        return sub {
+            my ($class, $response, %opts) = @_;
+
+            my @list;
+            my $created;
+            foreach my $resp (@$response) {
+                if ($resp->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK) {
+                    my $tuples = delete $resp->{tuples}; # "delete" is important. it prevents considirable performance penalty in perl 5.8 on "bless" bellow caused by S_reset_amagic
+                    foreach my $tuple (@$tuples) {
+                        $tuple->{shard_num} = $resp->{shard_num} if $sharding;
+                        $tuple->{replica} = 1 if $resp->{replica};
+                        $tuple->{exists} = 1;
+                    }
+                    if ($opts{create} && !$resp->{replica} && @$tuples != @{$resp->{keys}}) {
+                        my $uniq_field = $uniq_field_by_index{$resp->{use_index}}
+                            or confess "option 'create => 1' should be used only with unique singlefield indexes";
+                        my %found = map { $_->{$uniq_field} => 1 } @$tuples;
+                        my @created = map $class->_create_default($uniq_field => $_), grep !$found{$_}, @{$resp->{keys}};
+                        push @list, @created;
+                        $created = 1 if @created;
+                    }
+                    push @list, @$tuples;
+                } elsif ($opts{noraise_unavailable}) {
+                    my $count = @{$resp->{keys}};
+                    cluck "Failed to select $class, $count items are unavailable: $resp->{error}";
+                } else {
+                    confess "Failed to select $class: $resp->{error}";
+                }
+            }
+            if (@list) {
+                $deserialize->(\@list) if $deserialize;
+                if ($object_tuples) {
+                    my $objects = $opts{objects};
+                    $object_tuples->(\@list, $objects) if $objects && %$objects;
+                }
+                foreach (@list) {
+                    bless $_, $class;
+                    $meta->_initialize_object($_, {}, 1);
+                }
+                if ($created) {
+                    $_->insert() foreach grep !$_->exists, @list;
+                }
+            }
+            if ($opts{bulk}) {
+                return \@list;
+            } else {
+                cluck sprintf "Select returned %d rows when only one row was expected", scalar @list if @list > 1;
+                return $list[0];
+            }
+        }
+    },
+);
+
 sub set_iproto {
     my $self = shift;
     my $iproto = @_ == 1 ? shift : $self->iproto_class->new(@_);
@@ -398,6 +496,7 @@ after make_immutable => sub {
     $self->deserialize;
     $self->index_by_name;
     $self->fields_accessors;
+    $self->_install_select();
     return;
 };
 
@@ -435,6 +534,14 @@ sub _validate_indexes {
     return unless @empty;
     my $numbers = join ', ', @empty;
     confess "Indexes number $numbers are not defined";
+}
+
+sub _install_select {
+    my ($self) = @_;
+    if ($self->name->can('select') == \&MR::Tarantool::Box::Record::Object::select) {
+        $self->add_method(select => $self->select);
+    }
+    return;
 }
 
 no Mouse::Role;

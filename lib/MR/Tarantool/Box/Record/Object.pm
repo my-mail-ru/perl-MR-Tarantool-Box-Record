@@ -1,7 +1,6 @@
 package MR::Tarantool::Box::Record::Object;
 
 use Mouse;
-use Carp 'cluck';
 use MR::Tarantool::Box::XS;
 use overload
     '%{}' => sub { confess "Direct access to attributes through hash is provibited. Use accessors instead." },
@@ -41,110 +40,7 @@ has _update_ops => (
 );
 
 sub select {
-    my ($class, $field, $keys, %opts) = @_;
-    my $keys_is_array = ref $keys eq 'ARRAY' || blessed $keys && overload::Method($keys, '@{}');
-    my $noraise = delete $opts{noraise_unavailable};
-    my $meta = $class->meta;
-    my $box = $meta->box;
-    my $index = $meta->index_by_name->{$field}
-        or confess "Can't use field '$field' as an indexed field";
-    my $uniq = $index->uniq;
-    my $multifield = $index->multifield;
-    my $single_multifield = $keys_is_array && $multifield && @$keys && ref $keys->[0] ne 'ARRAY';
-    my $keys_is_bulk = $keys_is_array && !$single_multifield || ref $keys eq 'HASH';
-    my $wantarrayref = $keys_is_bulk || !$uniq;
-    $keys = [ $keys ] unless $keys_is_bulk;
-    my $object_map = delete $opts{objects} || {};
-    if (delete $opts{by_object} && (my $deobject_keys = $index->deobject_keys)) {
-        $keys = $deobject_keys->($keys, $object_map);
-    }
-    my $shard_keys;
-    my $prepare_keys = $index->prepare_keys;
-    if (ref $keys eq 'HASH') {
-        confess "option 'shard_num' shouldn't be used with \$keys passed as a HASHREF" if exists $opts{shard_num};
-        $shard_keys = { map { $_ => $prepare_keys ? $prepare_keys->($keys->{$_}) : $keys->{$_} } keys %$keys };
-    } else {
-        my $shard_nums;
-        if (!exists $opts{shard_num} && (my $shard_by = $index->shard_by)) {
-            my $shard_num = $class->$shard_by($keys, objects => $object_map);
-            if (ref $shard_num) {
-                $shard_nums = $shard_num;
-            } else {
-                $opts{shard_num} = $shard_num;
-            }
-        }
-        $keys = $prepare_keys->($keys) if $prepare_keys;
-        if ($shard_nums) {
-            confess "size of ARRAYREF returned by 'shard_by' function should be equal to size of keys ARRAYREF" unless @$shard_nums == @$keys;
-            $shard_keys = {};
-            foreach (0 .. $#$keys) {
-                my $shard_num = $shard_nums->[$_] or next;
-                push @{$shard_keys->{$shard_num}}, $keys->[$_];
-            }
-        } else {
-            if ($opts{shard_num} && $opts{shard_num} eq 'all') {
-                delete $opts{shard_num};
-                $shard_keys = { map { $_ => $keys } (1 .. $box->iproto->get_shard_count()) };
-            }
-        }
-    }
-    my $single = delete $opts{single};
-    my $create = delete $opts{create};
-    confess "option 'create => 1' should be used only with unique singlefield indexes" if $create && (!$uniq || $multifield);
-    $opts{limit} = $index->default_limit if !exists $opts{limit} && $index->has_default_limit();
-    confess "option 'limit' should be specified or 'default_limit' should be set on index if non-unique index is used" if !$uniq && !exists $opts{limit};
-    my $created;
-    $opts{type} = 'select';
-    $opts{use_index} = $index->index;
-    $opts{inplace} = 1;
-    my @request = $shard_keys ? map +{ %opts, keys => $shard_keys->{$_}, shard_num => $_ }, keys %$shard_keys : { %opts, keys => $keys };
-    @request = map { my $r = $_; map +{ %$r, keys => [ $_ ] }, @{$r->{keys}} } @request if $single;
-    my $response = $box->bulk(\@request);
-    my @list;
-    foreach my $resp (@$response) {
-        if ($resp->{error} == MR::Tarantool::Box::XS::ERR_CODE_OK) {
-            my $tuples = delete $resp->{tuples}; # "delete" is important. it prevents considirable performance penalty in perl 5.8 on "bless" bellow caused by S_reset_amagic
-            foreach my $tuple (@$tuples) {
-                $tuple->{shard_num} = $resp->{shard_num} if exists $resp->{shard_num};
-                $tuple->{replica} = 1 if $resp->{replica};
-                $tuple->{exists} = 1;
-            }
-            if ($create && !$resp->{replica}) {
-                my $key_field = $index->fields->[0];
-                my %found = map { $_->{$key_field} => 1 } @$tuples;
-                my @created = map $class->_create_default($key_field => $_), grep !$found{$_}, @{$resp->{keys}};
-                push @list, @created;
-                $created = 1 if @created;
-            }
-            push @list, @$tuples;
-        } else {
-            if ($noraise) {
-                my $count = @{$resp->{keys}};
-                cluck "Failed to select $class, $count items are unavailable: $resp->{error}";
-            } else {
-                confess "Failed to select $class: $resp->{error}";
-            }
-        }
-    }
-    if (my $deserialize = $meta->deserialize) {
-        $deserialize->(\@list);
-    }
-    if (%$object_map && (my $object_tuples = $meta->object_tuples)) {
-        $object_tuples->(\@list, $object_map);
-    }
-    foreach (@list) {
-        bless $_, $class;
-        $meta->_initialize_object($_, {}, 1);
-    }
-    if ($created) {
-        $_->insert() foreach grep !$_->exists, @list;
-    }
-    if ($wantarrayref) {
-        return \@list;
-    } else {
-        cluck sprintf "Select returned %d rows when only one row was expected", scalar @list if @list > 1;
-        return $list[0];
-    }
+    shift->meta->select->(@_);
 }
 
 sub insert {

@@ -138,7 +138,7 @@ has ascii => (
             $args->{builder} = $args->{sequence}->next_method;
         }
 
-        if (!$args->{required} && !exists $args->{default} && !exists $args->{builder} && exists $default{$args->{format}}) {
+        if (!$args->{required} && !exists $args->{default} && !exists $args->{builder} && exists $default{$args->{format}} && $args->{is} ne 'bare') {
             $args->{default} = $default{$args->{format}};
         }
 
