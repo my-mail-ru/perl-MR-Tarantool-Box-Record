@@ -155,7 +155,7 @@ has select_request => (
             my $objects = delete $opts{objects};
             my $by_object = delete $opts{by_object};
 
-            my $keys_is_bulk = $multifield ? ref $keys eq 'HASH' || !@$keys || ref $keys->[0] eq 'ARRAY'
+            my $keys_is_bulk = $multifield ? ref $keys eq 'HASH' || ref $keys eq 'ARRAY' && (!@$keys || ref $keys->[0] eq 'ARRAY')
                 : ref $keys && (
                     ref $keys eq 'HASH' || ref $keys eq 'ARRAY'
                     || $by_object && blessed $keys && overload::Method($keys, '@{}')
