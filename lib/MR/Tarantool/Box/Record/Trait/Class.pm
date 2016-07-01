@@ -496,6 +496,7 @@ after make_immutable => sub {
     $self->deserialize;
     $self->index_by_name;
     $self->fields_accessors;
+    $self->select;
     $self->_install_select();
     return;
 };
