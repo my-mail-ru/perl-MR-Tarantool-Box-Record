@@ -395,7 +395,7 @@ sub microshard {
     my $mask = (1 << $bits) - 1;
     $self->add_attribute('+shard_num',
         lazy    => 1,
-        default => sub { $_[0]->$field & $mask },
+        default => sub { ($_[0]->$field & $mask) + 1 },
     );
     return;
 }
