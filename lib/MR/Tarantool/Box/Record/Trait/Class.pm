@@ -116,7 +116,7 @@ has box => (
         return $self->box_class->new(
             iproto    => $self->_iproto,
             namespace => $self->space,
-            $self->microshard_bits ? (microsharding => (1<<$self->microshard_bits)+1) : (),
+            $self->microshard_bits ? (microsharding => 1<<$self->microshard_bits) : (),
             fields    => \@fields,
             format    => $format,
             indexes   => \@indexes,
