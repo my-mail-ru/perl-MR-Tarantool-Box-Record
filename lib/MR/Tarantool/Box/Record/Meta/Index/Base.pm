@@ -148,7 +148,16 @@ has select_request => (
         my $prepare_keys = $self->prepare_keys;
         my $shard_count = $self->associated_class->box->iproto->get_shard_count();
         my $shard_by = $self->shard_by;
+        my $microshard_field = $self->associated_class->microshard_field;
+        my $microshard_bits = $self->associated_class->microshard_bits;
         my $class = $self->associated_class->name;
+        my $microshard_field_num;
+        for (my $i = 0; $i <= @{$self->fields}; $i++){
+            if ($self->fields->[$i] eq $microshard_field){
+                $microshard_field_num = $i;
+                last;
+            }
+        }
         return sub {
             my ($keys, %opts) = @_;
 
@@ -200,6 +209,18 @@ has select_request => (
                     $shard_keys = { map { $_ => $keys } (1 .. $shard_count) };
                 } else {
                     $opts{shard_num} = $shard_num;
+                }
+            } elsif ($microshard_field) {
+                if (defined $microshard_field_num) {
+                    $shard_keys = {};
+                    
+                    for (@$keys) {
+                        my $shard_num = (($multifield ? $_->[$microshard_field_num] : $_) % (1 << $microshard_bits)) + 1;
+                        push @{$shard_keys->{$shard_num}}, $_;
+                    }
+                }
+                else {
+                    die "Not implemented select by all shards in microsharding!";
                 }
             }
 

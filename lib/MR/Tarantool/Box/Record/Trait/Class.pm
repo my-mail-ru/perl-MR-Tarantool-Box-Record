@@ -56,6 +56,11 @@ has space => (
     isa => 'Int',
 );
 
+has microsharding => (
+    is => 'rw',     
+    isa => 'Int',
+);
+
 has microshard_field => (
     is  => 'rw',
     isa => 'Str',
@@ -111,6 +116,7 @@ has box => (
         return $self->box_class->new(
             iproto    => $self->_iproto,
             namespace => $self->space,
+            $self->microshard_bits ? (microsharding => (1<<$self->microshard_bits)+1) : (),
             fields    => \@fields,
             format    => $format,
             indexes   => \@indexes,
@@ -220,13 +226,13 @@ has validate => (
             my ($data, $shard_num) = @_;
             foreach my $f (@int) {
                 confess "Value of field $f doesn't match shard_num ($data->{$f} not in $shard_num)"
-                    unless ($data->{$f} & $mask) == $shard_num;
+                    unless ($data->{$f} & $mask) + 1 == $shard_num;
             }
             foreach my $f (@str) {
                 confess "Value of field $f is too short" unless length $data->{$f} >= $quarts;
                 my $v = reverse substr $data->{$f}, 0, $quarts;
                 confess "Value of field $f doesn't match shard_num (\"$data->{$f}\" not in $shard_num)"
-                    unless ($v & $mask) == $shard_num;
+                    unless ($v & $mask) + 1 == $shard_num;
             }
             return;
         };
