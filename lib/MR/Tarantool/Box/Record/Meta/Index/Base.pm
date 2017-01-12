@@ -152,10 +152,12 @@ has select_request => (
         my $microshard_bits = $self->associated_class->microshard_bits;
         my $class = $self->associated_class->name;
         my $microshard_field_num;
-        for (my $i = 0; $i <= @{$self->fields}; $i++){
-            if ($self->fields->[$i] eq $microshard_field){
-                $microshard_field_num = $i;
-                last;
+        if ($microshard_field){
+            for (my $i = 0; $i <= @{$self->fields}; $i++){
+                if ($self->fields->[$i] eq $microshard_field){
+                    $microshard_field_num = $i;
+                    last;
+                }
             }
         }
         return sub {
