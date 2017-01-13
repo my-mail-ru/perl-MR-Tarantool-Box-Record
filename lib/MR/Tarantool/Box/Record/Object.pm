@@ -56,6 +56,9 @@ sub insert {
             $serialize->([\%data]);
         }
         my $shard_num = $item->shard_num;
+        if (my $validate = $meta->validate) {
+            $validate->(\%data, $shard_num);
+        }
         push @request, {
             %opts,
             type  => $insert_box ? 'call' : 'insert',
